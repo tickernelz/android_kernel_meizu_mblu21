@@ -106,8 +106,10 @@ jobs:
       - name: Check module ABI against stock modules
         run: |
           set -euo pipefail
-            python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee abi-vendor_dlkm.txt
-            python3 scripts/module_abi.py check --imports abi/system_dlkm.imports.tsv --module-exports abi/system_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee abi-system_dlkm.txt
+          for set in vendor_boot vendor_dlkm system_dlkm; do
+            echo "== $set" | tee "abi-$set.txt"
+            python3 scripts/module_abi.py check --imports "abi/$set.imports.tsv" --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee -a "abi-$set.txt"
+          done
 
       - name: Pack boot image
         run: |
@@ -125,8 +127,9 @@ jobs:
             echo '```'
             cat config-report.txt
             echo '```'
-            cat abi-vendor_dlkm.txt
-            cat abi-system_dlkm.txt
+            echo '```'
+            cat abi-vendor_boot.txt abi-vendor_dlkm.txt abi-system_dlkm.txt
+            echo '```'
             cat "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -137,6 +140,7 @@ jobs:
             ${{ runner.temp }}/boot-${{ matrix.variant }}.img
             ${{ runner.temp }}/boot-${{ matrix.variant }}.img.sha256
             config-report.txt
+            abi-vendor_boot.txt
             abi-vendor_dlkm.txt
             abi-system_dlkm.txt
 
@@ -231,7 +235,7 @@ jobs:
           for variant in sukisu-ultra kernelsu-next; do
             tag="$variant-$tag_suffix-untested"
             files=("assets/boot-$variant/boot-$variant.img" "assets/boot-$variant/boot-$variant.img.sha256"
-                   "assets/boot-$variant/abi-vendor_dlkm.txt" "assets/boot-$variant/abi-system_dlkm.txt"
+                   "assets/boot-$variant/abi-vendor_boot.txt" "assets/boot-$variant/abi-vendor_dlkm.txt" "assets/boot-$variant/abi-system_dlkm.txt"
                    "assets/boot-$variant/config-report.txt" "assets/lkm-$variant/lkm-$variant.log")
             for extra in "init_boot-$variant-lkm.img" "init_boot-$variant-lkm.img.sha256" susfs_guard_lkm.ko; do
               if [ -f "assets/lkm-$variant/$extra" ]; then

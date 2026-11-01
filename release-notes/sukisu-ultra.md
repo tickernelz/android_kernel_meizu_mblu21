@@ -12,6 +12,7 @@ Pick one path, not both. Both require an unlocked bootloader.
 
 Static validation attached to this release:
 
+- `abi-vendor_boot.txt` - every symbol the 139 stock first-stage modules in `vendor_boot` import, compared against the built kernel's `Module.symvers`
 - `abi-vendor_dlkm.txt` - every symbol the 113 stock `vendor_dlkm` modules import, compared against the built kernel's `Module.symvers`
 - `abi-system_dlkm.txt` - the same check for the stock `system_dlkm` modules
 - `config-report.txt` - kernel configuration of the built image

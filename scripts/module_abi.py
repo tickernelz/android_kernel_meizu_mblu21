@@ -9,6 +9,7 @@ import struct
 import sys
 
 MODULE_NAME_LEN = 56
+SHN_ABS = 0xFFF1
 
 
 class Elf:
@@ -50,13 +51,6 @@ class Elf:
             out[name] = entry
         return out
 
-    def strings_at(self, addr, length):
-        table = self.sections["__ksymtab_strings"]
-        offset = table["offset"] + (addr - table["addr"])
-        if offset < 0 or offset + length > len(self.data):
-            raise ValueError(f"{self.path}: symbol name outside __ksymtab_strings")
-        return self.data[offset:offset + length].split(b"\x00", 1)[0].decode("ascii", "replace")
-
     def imports(self):
         section = self.sections.get("__versions")
         if section is None:
@@ -71,33 +65,31 @@ class Elf:
                 out.append((name, crc))
         return out
 
-    def exports(self):
-        out = []
-        for name, section in sorted(self.sections.items()):
-            if not name.startswith("__ksymtab") or name == "__ksymtab_strings":
-                continue
-            suffix = name[len("__ksymtab"):]
-            crc_section = self.sections.get("__kcrctab" + suffix)
-            if crc_section is None:
-                raise ValueError(f"{self.path}: {name} has no matching __kcrctab{suffix}")
-            entsize = section["entsize"] or 12
-            count = section["size"] // entsize
-            if count != crc_section["size"] // 4:
-                raise ValueError(f"{self.path}: {name} has {count} entries but {crc_section['size'] // 4} crcs")
-            for index in range(count):
-                base = section["offset"] + index * entsize
-                name_offset, = struct.unpack_from("<i", self.data, base + 4)
-                field_addr = section["addr"] + index * entsize + 4
-                symbol = self.strings_at((field_addr + name_offset) & 0xFFFFFFFFFFFFFFFF, 256)
-                crc, = struct.unpack_from("<I", self.data, crc_section["offset"] + index * 4)
-                out.append((symbol, crc))
-        return out
+    def symbols(self):
+        symtab = self.sections.get(".symtab")
+        if symtab is None:
+            raise ValueError(f"{self.path}: no .symtab")
+        strtab = next(entry for entry in self.sections.values() if entry is not symtab and entry["type"] == 3 and entry["name"] == ".strtab")
+        entsize = symtab["entsize"] or 24
+        for index in range(symtab["size"] // entsize):
+            base = symtab["offset"] + index * entsize
+            name_off, info, _other, shndx, value, _size = struct.unpack_from("<IBBHQQ", self.data, base)
+            start = strtab["offset"] + name_off
+            name = self.data[start:self.data.index(b"\x00", start)].decode("ascii", "replace")
+            yield name, value, shndx
 
-    def modinfo_vermagic(self):
-        section = self.sections.get("__versions")
-        if section is None:
-            return None
-        return section["name"]
+    def exports(self):
+        names = set()
+        crcs = {}
+        for name, value, shndx in self.symbols():
+            if name.startswith("__ksymtab_") and name != "__ksymtab_strings":
+                names.add(name[len("__ksymtab_"):])
+            elif name.startswith("__crc_") and shndx == SHN_ABS:
+                crcs[name[len("__crc_"):]] = value & 0xFFFFFFFF
+        missing = sorted(names - set(crcs))
+        if missing:
+            raise ValueError(f"{self.path}: exported without __crc_ symbol: {missing[:5]}")
+        return sorted((name, crcs[name]) for name in names)
 
 
 def module_paths(paths):
@@ -189,9 +181,9 @@ def load_inputs(args):
     _, import_rows = read_tsv(args.imports)
     imports = [(row[0], row[1], int(row[2], 16)) for row in import_rows]
     module_exported = set()
-    if args.module_exports:
-        _, export_rows = read_tsv(args.module_exports)
-        module_exported = {row[0] for row in export_rows}
+    for path in args.module_exports or []:
+        _, export_rows = read_tsv(path)
+        module_exported.update(row[0] for row in export_rows)
     return imports, module_exported
 
 
@@ -206,8 +198,6 @@ def report(result, limit=25):
         print(f"  mismatch {symbol}: module wants {want:08x}, kernel exports {got:08x} ({module})")
     for module, symbol in missing[:limit]:
         print(f"  missing {symbol} ({module})")
-    for module, symbol in gpl_only[:limit]:
-        print(f"  gpl-only {symbol} ({module})")
     return not mismatched and not missing
 
 
@@ -260,7 +250,7 @@ def main(argv):
     extract.set_defaults(func=cmd_extract)
     check = sub.add_parser("check", help="compare stored module ABI against a built Module.symvers")
     check.add_argument("--imports", required=True)
-    check.add_argument("--module-exports")
+    check.add_argument("--module-exports", nargs="*", default=[])
     check.add_argument("--symvers", required=True)
     check.add_argument("--self-test", action="store_true")
     check.set_defaults(func=cmd_check)

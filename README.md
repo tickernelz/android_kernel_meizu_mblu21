@@ -38,14 +38,18 @@ Why the two implementations differ here:
 
 ## Static validation
 
-The phone's 113 `vendor_dlkm` modules were built against the stock kernel and carry a `__versions` section: the CRC of every symbol they import. A kernel whose symbol CRCs differ from the stock kernel loads those modules only by luck; a mismatch on the symbols they use is what turns a custom kernel into a bootloop.
+The phone's vendor modules (113 in `vendor_dlkm`, 139 in the `vendor_boot` first-stage ramdisk) were built against the stock kernel and carry a `__versions` section: the CRC of every symbol they import. A kernel whose symbol CRCs differ from the stock kernel loads those modules only by luck; a mismatch on the symbols they use is what turns a custom kernel into a bootloop.
 
-`scripts/module_abi.py` decodes `__versions` and `__ksymtab` out of every stock module, stores the result as derived text in `abi/` (no vendor binaries are redistributed), and compares it against the built kernel's `Module.symvers`:
+`scripts/module_abi.py` reads `__versions` and the `__ksymtab_*`/`__crc_*` symbols out of every stock module, stores the result as derived text in `abi/` (no vendor binaries are redistributed), and compares it against the built kernel's `Module.symvers`:
 
-- 113 `vendor_dlkm` modules, 6,621 imported symbols, 489 symbols exported between those modules
-- 2 `system_dlkm` modules, 151 imported symbols
-- A symbol imported from another stock module is skipped: that binary does not change
-- `--self-test` perturbs half of the CRCs and drops a tenth of the imports, then asserts the checker reports exactly those failures. Without it, a checker that always prints zero would look identical to a good kernel.
+| Module set | Modules | Imported symbols | Exported symbols |
+|---|---|---|---|
+| `vendor_boot` first-stage ramdisk | 139 | 7,031 | 493 |
+| `vendor_dlkm` | 113 | 6,621 | 540 |
+| `system_dlkm` | 2 | 151 | 10 |
+
+- A symbol imported from another stock module is skipped: that binary does not change. Across all three sets, 927 such imports point at 805 module exports, and every one of them carries the same CRC on both sides.
+- `--self-test` perturbs a fifth of the kernel symbols and drops a tenth, then asserts the checker reports exactly those failures. Without it, a checker that always prints zero would look identical to a good kernel.
 
 CI fails the build on any mismatch or missing symbol, so `0 mismatches / 0 missing` in the job summary means the checker ran and found nothing, not that it was skipped.
 
@@ -62,7 +66,7 @@ Each release holds, per variant:
 | `init_boot-<variant>-lkm.img` | `init_boot` (KernelSU-Next only) |
 | `init_boot-<variant>-lkm.img.sha256` | - |
 | `susfs_guard_lkm.ko` | SUSFS module for KernelSU-Next, loaded by its manager |
-| `abi-vendor_dlkm.txt`, `abi-system_dlkm.txt` | module ABI report of that build |
+| `abi-vendor_boot.txt`, `abi-vendor_dlkm.txt`, `abi-system_dlkm.txt` | module ABI report of that build |
 | `config-report.txt` | kernel configuration of the built image |
 | `lkm-<variant>.log` | how the init_boot image was patched |
 
@@ -176,9 +180,9 @@ Locally, with the pieces available:
 ```sh
 scripts/sync_sources.sh "$HOME/gki" be074b05e5aff5eb16a848fb3aaab2f73d687cb6 8
 scripts/apply_root.sh "$HOME/gki" https://github.com/SukiSU-Ultra/SukiSU-Ultra b16e899a555e9b96aa1225f049cd7274820ca5b8 patches/0001-susfs-android13-5.15.patch CONFIG_KSU=y
-cd "$HOME/gki" && tools/bazel build --config=fast //common:kernel_aarch64_dist
-scripts/make_boot.sh "$HOME/gki/out/dist/Image" boot-sukisu-ultra.img . 67108864
-python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_dlkm.exports.tsv --symvers "$HOME/gki/out/dist/Module.symvers" --self-test
+cd "$HOME/gki" && tools/bazel run --config=fast //common:kernel_aarch64_dist -- --dist_dir="$HOME/dist"
+scripts/make_boot.sh "$HOME/dist/Image" boot-sukisu-ultra.img . 67108864
+python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "$HOME/dist/kernel_aarch64_Module.symvers" --self-test
 ```
 
 `scripts/bootimg.py` is a self-contained boot header v3/v4 packer; packing the stock kernel with it reproduces the stock `boot` and `init_boot` images byte for byte, which is the check that keeps it honest.
