@@ -68,34 +68,50 @@ jobs:
       - name: Build kernel
         run: |
           cd "$RUNNER_TEMP/gki"
-          tools/bazel build $KLEAF_FLAGS //common:kernel_aarch64_dist
+          tools/bazel run $KLEAF_FLAGS //common:kernel_aarch64_dist -- --dist_dir="$RUNNER_TEMP/dist"
 
       - name: Collect artifacts
         id: collect
         run: |
           set -euo pipefail
-          dist="$RUNNER_TEMP/gki/out/dist"
-          if [ ! -d "$dist" ]; then
-            dist=$(dirname "$(find "$RUNNER_TEMP/gki" -name Module.symvers -not -path '*/bazel-*/*' | head -1)")
-          fi
-          echo "dist=$dist" >> "$GITHUB_OUTPUT"
+          dist="$RUNNER_TEMP/dist"
           ls -la "$dist"
-          test -f "$dist/Image"
-          test -f "$dist/Module.symvers"
-          test -f "$dist/.config"
-          grep -E '^CONFIG_KSU|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_KSU_SUSFS|^CONFIG_MODULE_SIG_PROTECT' "$dist/.config" | sort | tee config-report.txt
-          grep -qx '${{ matrix.required_config }}' "$dist/.config"
+          image="$dist/Image"
+          test -f "$image"
+          objdir=$(dirname "$(find "$RUNNER_TEMP/gki/out" -path '*/output_user_root' -prune -o -name vmlinux.symvers -print | head -1)")
+          echo "kbuild objdir: $objdir"
+          symvers=$(find "$dist" -maxdepth 1 -name '*Module.symvers' | head -1)
+          if [ -z "$symvers" ]; then
+            symvers="$objdir/Module.symvers"
+          fi
+          config="$objdir/.config"
+          test -f "$symvers"
+          test -f "$config"
+          if [ -f "$objdir/arch/arm64/boot/Image" ] && ! cmp -s "$image" "$objdir/arch/arm64/boot/Image"; then
+            echo "dist Image differs from $objdir/arch/arm64/boot/Image; Module.symvers may belong to another build" >&2
+            exit 1
+          fi
+          {
+            echo "symvers=$symvers"
+            echo "image=$image"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "kernel release: $(grep -a -o -m1 'Linux version 5[^(]*' "$image")"
+            echo "Module.symvers: $(basename "$symvers") ($(wc -l < "$symvers") exports)"
+            grep -E '^CONFIG_KSU|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
+          } | tee config-report.txt
+          grep -qx '${{ matrix.required_config }}' "$config"
+          grep -qx 'CONFIG_KSU=y' "$config"
 
       - name: Check module ABI against stock modules
         run: |
           set -euo pipefail
-          dist="${{ steps.collect.outputs.dist }}"
-            python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_dlkm.exports.tsv --symvers "$dist/Module.symvers" --self-test | tee abi-vendor_dlkm.txt
-            python3 scripts/module_abi.py check --imports abi/system_dlkm.imports.tsv --module-exports abi/system_dlkm.exports.tsv --symvers "$dist/Module.symvers" --self-test | tee abi-system_dlkm.txt
+            python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee abi-vendor_dlkm.txt
+            python3 scripts/module_abi.py check --imports abi/system_dlkm.imports.tsv --module-exports abi/system_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee abi-system_dlkm.txt
 
       - name: Pack boot image
         run: |
-          scripts/make_boot.sh "${{ steps.collect.outputs.dist }}/Image" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$GITHUB_WORKSPACE" "$BOOT_PARTITION_SIZE"
+          scripts/make_boot.sh "${{ steps.collect.outputs.image }}" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$GITHUB_WORKSPACE" "$BOOT_PARTITION_SIZE"
 
       - name: Verify boot image
         run: |
