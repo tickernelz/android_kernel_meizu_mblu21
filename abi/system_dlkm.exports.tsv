@@ -1,0 +1,11 @@
+symbol	module	crc
+	zsmalloc.ko	00000000
+_pool	zsmalloc.ko	00000000
+_total_pages	zsmalloc.ko	00000000
+_unmap_object	zsmalloc.ko	00000000
+e	zsmalloc.ko	00000000
+ect	zsmalloc.ko	00000000
+ge_class_size	zsmalloc.ko	00000000
+ompact	zsmalloc.ko	00000000
+t	zsmalloc.ko	00000000
+zs_malloc	zsmalloc.ko	00000000
