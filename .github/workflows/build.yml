@@ -11,7 +11,7 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
@@ -22,6 +22,7 @@ env:
   BOOT_PARTITION_SIZE: "67108864"
   INIT_BOOT_PARTITION_SIZE: "8388608"
   KLEAF_FLAGS: --config=fast
+  REPO_LAUNCHER_SHA256: 05f571deafd6ed6da0d20fa707dde29aa5624dbf35553d697a40dbdd4c8d178a
 
 jobs:
   kernel:
@@ -44,6 +45,8 @@ jobs:
             required_config: CONFIG_KSU=y
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Free disk space
         run: |
@@ -56,6 +59,7 @@ jobs:
           mkdir -p "$HOME/bin"
           echo "$HOME/bin" >> "$GITHUB_PATH"
           curl -fsSL -o "$HOME/bin/repo" https://storage.googleapis.com/git-repo-downloads/repo
+          echo "$REPO_LAUNCHER_SHA256  $HOME/bin/repo" | sha256sum -c -
           chmod +x "$HOME/bin/repo"
 
       - name: Sync kernel sources
@@ -158,20 +162,29 @@ jobs:
           - variant: sukisu-ultra
             host_patch: false
             ksud_url: ""
+            ksud_sha256: ""
             kernelsu_ko_url: https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v4.3.0/lkm-aarch64-android13-5.15_kernelsu.ko
+            kernelsu_ko_sha256: c82513223b08404c51399595e38fe4e423d5bc5eb4e89f2c2765e139b548cff2
             susfs_ko_url: ""
+            susfs_ko_sha256: ""
           - variant: kernelsu-next
             host_patch: true
             ksud_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/ksud-x86_64-unknown-linux-musl
+            ksud_sha256: 4d22f89416e7eef8f684f1ed03d2bea19da33c7d41266546e94fd7d1f6cbeca9
             kernelsu_ko_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/aarch64_android13-5.15_kernelsu.ko
+            kernelsu_ko_sha256: d58d71d00e1ff49998a9c6d690fa2d8aa9567959ecff399a1b9ccc20199e68f0
             susfs_ko_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/android13-5.15_susfs_guard_lkm.ko
+            susfs_ko_sha256: 024aa0de96b9e2d45c7f9a086189d72f95d51028fec6621b48e5f548cd39dc26
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Fetch and describe the official ${{ matrix.variant }} LKM
         run: |
           set -euo pipefail
           curl -fsSL -o "$RUNNER_TEMP/kernelsu.ko" "${{ matrix.kernelsu_ko_url }}"
+          echo "${{ matrix.kernelsu_ko_sha256 }}  $RUNNER_TEMP/kernelsu.ko" | sha256sum -c -
           {
             echo "variant: ${{ matrix.variant }}"
             echo "lkm: ${{ matrix.kernelsu_ko_url }}"
@@ -181,6 +194,7 @@ jobs:
           modinfo -F vermagic "$RUNNER_TEMP/kernelsu.ko" | grep -q '^5\.15\.'
           if [ -n "${{ matrix.susfs_ko_url }}" ]; then
             curl -fsSL -o "$RUNNER_TEMP/susfs_guard_lkm.ko" "${{ matrix.susfs_ko_url }}"
+            echo "${{ matrix.susfs_ko_sha256 }}  $RUNNER_TEMP/susfs_guard_lkm.ko" | sha256sum -c -
             echo "susfs lkm: ${{ matrix.susfs_ko_url }} sha256 $(sha256sum "$RUNNER_TEMP/susfs_guard_lkm.ko" | cut -d' ' -f1)" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
             modinfo -F vermagic "$RUNNER_TEMP/susfs_guard_lkm.ko" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
           fi
@@ -192,6 +206,7 @@ jobs:
         if: matrix.host_patch
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ksud" "${{ matrix.ksud_url }}"
+          echo "${{ matrix.ksud_sha256 }}  $RUNNER_TEMP/ksud" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/ksud"
           "$RUNNER_TEMP/ksud" --help | head -20
 
@@ -222,8 +237,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [kernel, lkm]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
@@ -232,9 +251,14 @@ jobs:
       - name: Create releases
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          tag_suffix="${{ inputs.release_tag }}"
+          if ! [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "release_tag must match ^[A-Za-z0-9._-]+$" >&2
+            exit 1
+          fi
+          tag_suffix="$RELEASE_TAG"
           find assets -type f | sort
           for variant in sukisu-ultra kernelsu-next; do
             tag="$variant-$tag_suffix-untested"

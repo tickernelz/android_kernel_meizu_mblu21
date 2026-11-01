@@ -11,6 +11,7 @@ cd "$workspace"
 
 if [ ! -d .repo ]; then
   curl -fsSL -o repo https://storage.googleapis.com/git-repo-downloads/repo
+  echo "${REPO_LAUNCHER_SHA256:-05f571deafd6ed6da0d20fa707dde29aa5624dbf35553d697a40dbdd4c8d178a}  repo" | sha256sum -c -
   chmod +x repo
   ./repo init -u https://android.googlesource.com/kernel/manifest -b "$manifest_branch" --depth=1
 fi
