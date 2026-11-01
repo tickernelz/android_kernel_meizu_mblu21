@@ -29,8 +29,13 @@ if [ -e "$common/drivers/kernelsu" ]; then
   echo "drivers/kernelsu already exists, refusing to overwrite" >&2
   exit 1
 fi
-cp -a "$root_dir/kernel" "$common/drivers/kernelsu"
+cp -rL "$root_dir/kernel" "$common/drivers/kernelsu"
 rm -rf "$common/drivers/kernelsu/.git"
+leftover=$(find "$common/drivers/kernelsu" -type l)
+if [ -n "$leftover" ]; then
+  echo "symlinks left in drivers/kernelsu: $leftover" >&2
+  exit 1
+fi
 
 if ! grep -q 'obj-$(CONFIG_KSU) += kernelsu/' "$common/drivers/Makefile"; then
   printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$common/drivers/Makefile"
