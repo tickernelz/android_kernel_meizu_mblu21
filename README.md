@@ -20,7 +20,14 @@ Kernel sources and a GitHub Actions pipeline that produce two flashable images f
 | Path | What is flashed | Kernel changed | Root | SUSFS (root hiding) |
 |---|---|---|---|---|
 | LKM | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: no. KernelSU-Next: yes, through its own `susfs_guard_lkm.ko` |
-| Kernel | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS still comes from its LKM | 
+| Kernel | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko`, attached to the release |
+
+LKM path status per variant:
+
+| Variant | LKM for `android13-5.15` | Patched `init_boot` in the release |
+|---|---|---|
+| KernelSU-Next | `aarch64_android13-5.15_kernelsu.ko` from release `v3.4.2` | yes: patched on the CI host with the official `ksud-x86_64-unknown-linux-musl` (`ksud boot-patch --kmi android13-5.15`) from the stock `init_boot_a.bin` |
+| SukiSU-Ultra | `lkm-aarch64-android13-5.15_kernelsu.ko` from release `v4.3.0` | no: SukiSU-Ultra publishes `ksud` only for Android, and its `ksud` source does not build for a Linux host at `v4.3.0` (the `feature` module needs Android-only modules). The image is made by the manager app on the phone, steps below |
 
 Pick one path. Flashing both is not a supported combination.
 
@@ -52,8 +59,9 @@ Each release holds, per variant:
 |---|---|
 | `boot-<variant>.img` | `boot` |
 | `boot-<variant>.img.sha256` | - |
-| `init_boot-<variant>-lkm.img` | `init_boot` |
+| `init_boot-<variant>-lkm.img` | `init_boot` (KernelSU-Next only) |
 | `init_boot-<variant>-lkm.img.sha256` | - |
+| `susfs_guard_lkm.ko` | SUSFS module for KernelSU-Next, loaded by its manager |
 | `abi-vendor_dlkm.txt`, `abi-system_dlkm.txt` | module ABI report of that build |
 | `config-report.txt` | kernel configuration of the built image |
 | `lkm-<variant>.log` | how the init_boot image was patched |
@@ -99,13 +107,32 @@ After the first boot, install the matching manager app on the phone:
 
 `init_boot` carries only the generic ramdisk; the stock kernel stays in place.
 
+**KernelSU-Next** (image ready in the release):
+
 ```sh
+sha256sum -c init_boot-kernelsu-next-lkm.img.sha256
 adb reboot bootloader
-fastboot flash init_boot init_boot-sukisu-ultra-lkm.img
+fastboot flash init_boot init_boot-kernelsu-next-lkm.img
 fastboot reboot
 ```
 
-Then install the same manager app as above and finish the module activation from the app.
+Then install `KernelSU_Next_v3.4.2_33355-release.apk`.
+
+**SukiSU-Ultra** (patched on the phone, because no host tool exists):
+
+1. Install `SukiSU_v4.3.0_41100-release.apk` on the phone. Root is not needed for this step.
+2. Copy the stock `init_boot_a.bin` to the phone: `adb push init_boot_a.bin /sdcard/Download/init_boot.img`.
+3. In the SukiSU-Ultra manager, open the install screen, choose "Select a file", pick `/sdcard/Download/init_boot.img`, and choose the KMI `android13-5.15` when asked.
+4. The manager writes the patched image to `/sdcard/Download/` (file name starts with `kernelsu_`). Pull it: `adb pull /sdcard/Download/kernelsu_patched_<date>.img`.
+5. Flash it:
+
+```sh
+adb reboot bootloader
+fastboot flash init_boot kernelsu_patched_<date>.img
+fastboot reboot
+```
+
+The manager menu labels can change between app versions; if they do, the official guide is <https://kernelsu.org/guide/installation.html> ("Patch boot.img with the manager"), which SukiSU-Ultra follows.
 
 ## Back to stock
 

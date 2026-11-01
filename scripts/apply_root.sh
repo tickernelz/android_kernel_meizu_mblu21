@@ -40,13 +40,18 @@ if ! grep -q 'drivers/kernelsu/Kconfig' "$common/drivers/Kconfig"; then
 fi
 
 if [ "$kernel_patch" != none ]; then
-  android_patch=$(cd "$(dirname "$kernel_patch")" && pwd)/$(basename "$kernel_patch")
+  android_patch=$(realpath "$kernel_patch")
   git -C "$common" apply --check "$android_patch"
   git -C "$common" apply "$android_patch"
   echo "applied $(basename "$android_patch")"
 fi
 
 defconfig="$common/arch/arm64/configs/gki_defconfig"
+sed -i 's/^POST_DEFCONFIG_CMDS="check_defconfig"$/POST_DEFCONFIG_CMDS=""/' "$common/build.config.gki"
+if grep -q 'check_defconfig' "$common/build.config.gki"; then
+  echo "check_defconfig still referenced in build.config.gki" >&2
+  exit 1
+fi
 while IFS= read -r line; do
   line=${line%%\#*}
   line=$(printf '%s' "$line" | tr -d '[:space:]')

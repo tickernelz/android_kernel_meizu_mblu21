@@ -63,7 +63,7 @@ jobs:
 
       - name: Apply ${{ matrix.variant }} integration
         run: |
-          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "$GITHUB_WORKSPACE/${{ matrix.kernel_patch }}" "CONFIG_KSU=y"
+          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" "CONFIG_KSU=y"
 
       - name: Build kernel
         run: |
@@ -133,55 +133,51 @@ jobs:
       matrix:
         include:
           - variant: sukisu-ultra
-            ksud_repo: https://github.com/SukiSU-Ultra/SukiSU-Ultra
-            ksud_ref: v4.3.0
-            ksud_from_source: true
+            host_patch: false
+            ksud_url: ""
             kernelsu_ko_url: https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v4.3.0/lkm-aarch64-android13-5.15_kernelsu.ko
-            ksuinit_url: https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v4.3.0/ksuinit-aarch64
+            susfs_ko_url: ""
           - variant: kernelsu-next
-            ksud_repo: https://github.com/KernelSU-Next/KernelSU-Next
-            ksud_ref: v3.4.2
-            ksud_from_source: false
+            host_patch: true
             ksud_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/ksud-x86_64-unknown-linux-musl
             kernelsu_ko_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/aarch64_android13-5.15_kernelsu.ko
-            ksuinit_url: ""
+            susfs_ko_url: https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.2/android13-5.15_susfs_guard_lkm.ko
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install rust toolchain
-        if: matrix.ksud_from_source
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustc --version
-
-      - name: Build ksud for the host
-        if: matrix.ksud_from_source
+      - name: Fetch and describe the official ${{ matrix.variant }} LKM
         run: |
           set -euo pipefail
-          git clone --quiet --depth=1 --branch "${{ matrix.ksud_ref }}" "${{ matrix.ksud_repo }}" "$RUNNER_TEMP/ksud-src"
-          cd "$RUNNER_TEMP/ksud-src"
-          cargo build --release -p ksud
-          install -m 0755 target/release/ksud "$RUNNER_TEMP/ksud"
-          "$RUNNER_TEMP/ksud" --help | head -20
+          curl -fsSL -o "$RUNNER_TEMP/kernelsu.ko" "${{ matrix.kernelsu_ko_url }}"
+          {
+            echo "variant: ${{ matrix.variant }}"
+            echo "lkm: ${{ matrix.kernelsu_ko_url }}"
+            echo "sha256: $(sha256sum "$RUNNER_TEMP/kernelsu.ko" | cut -d' ' -f1)"
+            modinfo "$RUNNER_TEMP/kernelsu.ko" | grep -E '^(vermagic|name|license|depends):'
+          } | tee "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+          modinfo -F vermagic "$RUNNER_TEMP/kernelsu.ko" | grep -q '^5\.15\.'
+          if [ -n "${{ matrix.susfs_ko_url }}" ]; then
+            curl -fsSL -o "$RUNNER_TEMP/susfs_guard_lkm.ko" "${{ matrix.susfs_ko_url }}"
+            echo "susfs lkm: ${{ matrix.susfs_ko_url }} sha256 $(sha256sum "$RUNNER_TEMP/susfs_guard_lkm.ko" | cut -d' ' -f1)" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+            modinfo -F vermagic "$RUNNER_TEMP/susfs_guard_lkm.ko" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+          fi
+          if [ "${{ matrix.host_patch }}" != true ]; then
+            echo "host patching: not available with the official ${{ matrix.variant }} tooling; init_boot is patched by the manager app on the phone (README)" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+          fi
 
       - name: Download ksud
-        if: ${{ !matrix.ksud_from_source }}
+        if: matrix.host_patch
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ksud" "${{ matrix.ksud_url }}"
           chmod +x "$RUNNER_TEMP/ksud"
           "$RUNNER_TEMP/ksud" --help | head -20
 
       - name: Patch stock init_boot
+        if: matrix.host_patch
         run: |
           set -euo pipefail
-          curl -fsSL -o "$RUNNER_TEMP/kernelsu.ko" "${{ matrix.kernelsu_ko_url }}"
-          if [ -n "${{ matrix.ksuinit_url }}" ]; then
-            curl -fsSL -o "$RUNNER_TEMP/ksuinit" "${{ matrix.ksuinit_url }}"
-            chmod +x "$RUNNER_TEMP/ksuinit"
-          fi
           mkdir -p "$RUNNER_TEMP/lkm-out"
-          scripts/patch_init_boot.sh "${{ matrix.variant }}" "$RUNNER_TEMP/ksud" "$RUNNER_TEMP/kernelsu.ko" "stock/init_boot_a.bin" "$RUNNER_TEMP/lkm-out" "$RUNNER_TEMP/ksuinit" | tee "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+          scripts/patch_init_boot.sh "${{ matrix.variant }}" "$RUNNER_TEMP/ksud" "$RUNNER_TEMP/kernelsu.ko" "stock/init_boot_a.bin" "$RUNNER_TEMP/lkm-out" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
           image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
           python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 | tee "$RUNNER_TEMP/lkm-verify-${{ matrix.variant }}.json"
           cp "$image" "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img"
@@ -190,10 +186,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: lkm-${{ matrix.variant }}
+          if-no-files-found: error
           path: |
             ${{ runner.temp }}/init_boot-${{ matrix.variant }}-lkm.img
             ${{ runner.temp }}/init_boot-${{ matrix.variant }}-lkm.img.sha256
             ${{ runner.temp }}/lkm-${{ matrix.variant }}.log
+            ${{ runner.temp }}/kernelsu.ko
+            ${{ runner.temp }}/susfs_guard_lkm.ko
 
   release:
     name: publish UNTESTED pre-releases
@@ -215,15 +214,20 @@ jobs:
           tag_suffix="${{ inputs.release_tag }}"
           for variant in sukisu-ultra kernelsu-next; do
             tag="$variant-$tag_suffix-untested"
-            dir="assets/boot-$variant"
-            cp "assets/lkm-$variant/init_boot-$variant-lkm.img" "$dir/"
-            cp "assets/lkm-$variant/init_boot-$variant-lkm.img.sha256" "$dir/"
-            cp "assets/lkm-$variant/lkm-$variant.log" "$dir/"
-            gh release delete "$tag" --yes --cleanup-tag || true
+            files=("assets/boot-$variant/boot-$variant.img" "assets/boot-$variant/boot-$variant.img.sha256"
+                   "assets/boot-$variant/abi-vendor_dlkm.txt" "assets/boot-$variant/abi-system_dlkm.txt"
+                   "assets/boot-$variant/config-report.txt" "assets/lkm-$variant/lkm-$variant.log")
+            for extra in "init_boot-$variant-lkm.img" "init_boot-$variant-lkm.img.sha256" susfs_guard_lkm.ko; do
+              if [ -f "assets/lkm-$variant/$extra" ]; then
+                files+=("assets/lkm-$variant/$extra")
+              fi
+            done
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "release $tag already exists; pick a new release_tag" >&2
+              exit 1
+            fi
             gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
               --title "UNTESTED - $variant $tag_suffix" \
               --notes-file "release-notes/$variant.md" \
-              "$dir/boot-$variant.img" "$dir/boot-$variant.img.sha256" \
-              "$dir/init_boot-$variant-lkm.img" "$dir/init_boot-$variant-lkm.img.sha256" \
-              "$dir/abi-vendor_dlkm.txt" "$dir/abi-system_dlkm.txt" "$dir/config-report.txt" "$dir/lkm-$variant.log"
+              "${files[@]}"
           done
