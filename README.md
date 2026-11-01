@@ -51,6 +51,23 @@ The phone's vendor modules (113 in `vendor_dlkm`, 139 in the `vendor_boot` first
 - A symbol imported from another stock module is skipped: that binary does not change. Across all three sets, 927 such imports point at 805 module exports, and every one of them carries the same CRC on both sides.
 - `--self-test` perturbs a fifth of the kernel symbols and drops a tenth, then asserts the checker reports exactly those failures. Without it, a checker that always prints zero would look identical to a good kernel.
 
+Result of the first green build (run 41279553995, both variants identical):
+
+| Module set | Imports checked against vmlinux | Imports between stock modules | CRC mismatches | Missing symbols |
+|---|---|---|---|---|
+| `vendor_boot` | 6,581 | 450 | 0 | 0 |
+| `vendor_dlkm` | 6,154 | 467 | 0 | 0 |
+| `system_dlkm` | 141 | 10 | 0 | 0 |
+
+The self-test passed in all three sets. The kernel's GKI protected-symbol lists (`android/abi_gki_modules_protected`, `android/abi_gki_modules_exports`) are empty at this tag, so unsigned vendor modules are not blocked from any symbol.
+
+Measured differences from the stock kernel, from the embedded `/proc/config.gz` of each image:
+
+- Added: `CONFIG_KSU=y` and the root implementation's options (SukiSU-Ultra also the ten `CONFIG_KSU_SUSFS*` options).
+- `CONFIG_LTO_CLANG_THIN` instead of `CONFIG_LTO_CLANG_FULL` (Kleaf `--config=fast`); symbol CRCs do not depend on it, which the gate above confirms.
+- `CONFIG_LOCALVERSION_AUTO` and `CONFIG_MODULE_SCMVERSION` off: the release string is `5.15.149-maybe-dirty` instead of `5.15.149-android13-8-00008-gbe074b05e5af-ab12096863`. With `CONFIG_MODVERSIONS` the kernel ignores the release part of a module's vermagic and compares only the flags (`SMP preempt mod_unload modversions aarch64`), which match. Apps can read the different string from `uname`; SUSFS `SPOOF_UNAME` exists for that.
+- Kernel size: SukiSU-Ultra 41,785,856 bytes, KernelSU-Next 41,781,760 bytes, stock 47,172,096 bytes; each `boot-<variant>.img` is padded to exactly the 67,108,864-byte partition.
+
 CI fails the build on any mismatch or missing symbol, so `0 mismatches / 0 missing` in the job summary means the checker ran and found nothing, not that it was skipped.
 
 What this does **not** prove: that the kernel boots, that the bootloader accepts the image, that SUSFS actually hides anything from a given app, or that the vendor modules work at runtime. Those are runtime facts and are unverified until the images run on hardware.

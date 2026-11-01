@@ -118,7 +118,7 @@ jobs:
       - name: Verify boot image
         run: |
           python3 scripts/verify_image.py --image "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" --max-size "$BOOT_PARTITION_SIZE" --header-version 4
-          sha256sum "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" | tee "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum "boot-${{ matrix.variant }}.img" | tee "boot-${{ matrix.variant }}.img.sha256")
 
       - name: Record validation summary
         run: |
@@ -133,16 +133,19 @@ jobs:
             cat "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Stage artifacts
+        run: |
+          stage="$RUNNER_TEMP/stage-${{ matrix.variant }}"
+          mkdir -p "$stage"
+          cp "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256" \
+             config-report.txt abi-vendor_boot.txt abi-vendor_dlkm.txt abi-system_dlkm.txt "$stage/"
+          ls -la "$stage"
+
       - uses: actions/upload-artifact@v4
         with:
           name: boot-${{ matrix.variant }}
-          path: |
-            ${{ runner.temp }}/boot-${{ matrix.variant }}.img
-            ${{ runner.temp }}/boot-${{ matrix.variant }}.img.sha256
-            config-report.txt
-            abi-vendor_boot.txt
-            abi-vendor_dlkm.txt
-            abi-system_dlkm.txt
+          if-no-files-found: error
+          path: ${{ runner.temp }}/stage-${{ matrix.variant }}/
 
   lkm:
     name: lkm ${{ matrix.variant }}
@@ -201,7 +204,7 @@ jobs:
           image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
           python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 | tee "$RUNNER_TEMP/lkm-verify-${{ matrix.variant }}.json"
           cp "$image" "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img"
-          sha256sum "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img" | tee "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum "init_boot-${{ matrix.variant }}-lkm.img" | tee "init_boot-${{ matrix.variant }}-lkm.img.sha256")
 
       - uses: actions/upload-artifact@v4
         with:
@@ -232,8 +235,10 @@ jobs:
         run: |
           set -euo pipefail
           tag_suffix="${{ inputs.release_tag }}"
+          find assets -type f | sort
           for variant in sukisu-ultra kernelsu-next; do
             tag="$variant-$tag_suffix-untested"
+            (cd "assets/boot-$variant" && sha256sum -c "boot-$variant.img.sha256" --ignore-missing)
             files=("assets/boot-$variant/boot-$variant.img" "assets/boot-$variant/boot-$variant.img.sha256"
                    "assets/boot-$variant/abi-vendor_boot.txt" "assets/boot-$variant/abi-vendor_dlkm.txt" "assets/boot-$variant/abi-system_dlkm.txt"
                    "assets/boot-$variant/config-report.txt" "assets/lkm-$variant/lkm-$variant.log")
