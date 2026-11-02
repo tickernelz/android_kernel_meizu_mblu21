@@ -91,7 +91,7 @@ Two kinds of release:
 
 | Release | Contents |
 |---|---|
-| `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the stock `init_boot_a`/`boot_a` images for restore, the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), the SukiSU-Ultra manager APK, the patch logs, and `SHA256SUMS` |
+| `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the stock `init_boot_a`/`boot_a` images for restore, the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), both manager APKs (SukiSU-Ultra and KernelSU-Next), the patch logs, and `SHA256SUMS` |
 | `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (untested), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 
 ## Install
@@ -125,7 +125,7 @@ Then install the matching manager and open it once:
 | Variant | Manager |
 |---|---|
 | SukiSU-Ultra | `SukiSU_v4.3.0_41100-release.apk` - attached to `mblu21-root-20261102`, or from `SukiSU-Ultra/SukiSU-Ultra` release `v4.3.0` |
-| KernelSU-Next | `KernelSU_Next_v3.4.2_33355-release.apk` from `KernelSU-Next/KernelSU-Next` release `v3.4.2` |
+| KernelSU-Next | `KernelSU_Next_v3.4.2_33355-release.apk` - attached to `mblu21-root-20261102`, or from `KernelSU-Next/KernelSU-Next` release `v3.4.2` |
 
 ### Path A - kernel with the driver built in (untested)
 

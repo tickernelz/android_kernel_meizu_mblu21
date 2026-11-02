@@ -130,6 +130,7 @@ Both were booted on this phone; pick one, not both. They replace the same file (
 | Image | `init_boot-sukisu-ultra-lkm.img` | `init_boot-kernelsu-next-lkm.img` |
 | SUSFS (root hiding) | yes, by installing the guard module (§6) | yes, by installing the guard module (§6) |
 | Manager app | `SukiSU_v4.3.0_41100-release.apk` | `KernelSU_Next_v3.4.2_33355-release.apk` |
+| Manager in the release | yes (`a928eb57…`) | yes (`774a5511…`) |
 | Extra kernel extensions (KPM, CPU spoof) | yes | no |
 
 SukiSU-Ultra is the one this phone ended up running. Take the image from the release page (`mblu21-root-20261102`) and check it:
