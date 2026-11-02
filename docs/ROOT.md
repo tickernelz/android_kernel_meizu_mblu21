@@ -1,6 +1,6 @@
 # Root tutorial — Meizu mBlu 21 (M416H), step by step
 
-Every command here was run on this exact phone model on 2026-11-02 and the outcome is recorded in [HARDWARE-2026-11-02.md](HARDWARE-2026-11-02.md). Read that page if you want the evidence behind a step; read this page if you just want root.
+The unlock and the `init_boot` writes below were run on this phone from Fedora on 2026-11-02; the same download-mode tooling had already read every partition out of the phone from Windows, which is where the 44-file dump came from. Both hosts use the same `spd_dump` with the same arguments, and the page gives the command for each. What was measured, with the partition hashes, is in [HARDWARE-2026-11-02.md](HARDWARE-2026-11-02.md).
 
 **What this does and does not touch.** Only `init_boot_a` is written. `boot`, `vendor_boot`, `dtbo` and `vbmeta` keep their Meizu content, which is the whole trick: this bootloader rejects any foreign `vbmeta` and any foreign `vendor_boot`, but it does not enforce verification of `init_boot`, so a root module loaded from that ramdisk boots fine.
 
