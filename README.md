@@ -26,7 +26,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 
 The **LKM path is tested on hardware**: both `init_boot` images boot and give root on a real mBlu 21, and the SUSFS guard module survives a reboot (details in [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md)).
 
-The **kernel path (`boot-<variant>.img`) is still UNTESTED.** Those images are built and pass the static ABI gate below, but no image signed with a foreign key has ever been written to `boot_a`. `vbmeta_a` chains `boot` to a Meizu key, so a rebuild is expected to be rejected; that expectation is unmeasured, which is why the CI releases stay pre-releases with `UNTESTED` in the name.
+The **kernel path (`boot-<variant>.img`) does not boot on this phone.** On 2026-11-03 the SukiSU-Ultra image (KPM + SUSFS, `61d6e77d…`) was written to `boot_a` with everything else stock: the phone stopped at a striped Meizu logo, never enumerated on USB and left nothing in pstore, and booted again only after `boot_a` was restored from download mode. `vbmeta_a` chains `boot` to a Meizu key, so the bootloader most likely refuses the foreign signature. The images stay as CI pre-releases for other units; use the LKM path here.
 
 ## Two paths
 

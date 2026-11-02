@@ -43,7 +43,10 @@ keeps the ramdisk, DTB, cmdline and bootconfig. The reference blob is
 - `fastboot flash` and `fastboot boot` answer `Status read failed`; write with `spd_dump`
   in Unisoc download mode or with `dd` as root.
 - The bootloader uses **Volume Down** as its confirm key on the unlock warning screen.
-  Pressing Volume Down inside recovery reboots the phone, which looks like a recovery
-  crash. Navigate with Volume Up, or drive recovery over adb.
+  Pressing the physical Volume Down key inside recovery resets the phone (bootcause
+  `Reboot due to sysdump finish`). Measured 2026-11-03: it happens without any root
+  module in `init_boot`, with `sprd_pmic_wdt` loaded, and not for Volume Up or for a
+  Volume Down event injected with `sendevent`, so it is below the recovery UI. Navigate
+  with Volume Up (the menu wraps) and Power, or drive recovery over adb.
 - recovery must set `/sys/class/backlight/sprd_backlight/brightness`; without it the
   screen is dark even though recovery is running.
