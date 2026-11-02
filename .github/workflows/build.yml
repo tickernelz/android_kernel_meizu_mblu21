@@ -40,12 +40,16 @@ jobs:
             root_url: https://github.com/SukiSU-Ultra/SukiSU-Ultra
             root_sha: b16e899a555e9b96aa1225f049cd7274820ca5b8
             kernel_patch: patches/0001-susfs-android13-5.15.patch
-            required_config: CONFIG_KSU_SUSFS=y
+            required_config: CONFIG_KPM=y
+            extra_config: CONFIG_KPM=y
+            kpm_patch: "0.14.0"
           - variant: kernelsu-next
             root_url: https://github.com/KernelSU-Next/KernelSU-Next
             root_sha: cefb048b069b7439fb4020d043de2d338dbc00fa
             kernel_patch: none
             required_config: CONFIG_KSU=y
+            extra_config: ""
+            kpm_patch: ""
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,7 +74,8 @@ jobs:
 
       - name: Apply ${{ matrix.variant }} integration
         run: |
-          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" "CONFIG_KSU=y"
+          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" "CONFIG_KSU=y
+          ${{ matrix.extra_config }}"
 
       - name: Build kernel
         run: |
@@ -105,7 +110,7 @@ jobs:
           {
             echo "kernel release: $(grep -a -o -m1 'Linux version 5[^(]*' "$image")"
             echo "Module.symvers: $(basename "$symvers") ($(wc -l < "$symvers") exports)"
-            grep -E '^CONFIG_KSU|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
+            grep -E '^CONFIG_KSU|^CONFIG_KPM|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
           } | tee config-report.txt
           grep -qx '${{ matrix.required_config }}' "$config"
           grep -qx 'CONFIG_KSU=y' "$config"
@@ -118,9 +123,31 @@ jobs:
             python3 scripts/module_abi.py check --imports "abi/$set.imports.tsv" --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee -a "abi-$set.txt"
           done
 
+      - name: Patch KPM into the kernel image
+        id: kpm
+        run: |
+          set -euo pipefail
+          image="${{ steps.collect.outputs.image }}"
+          if [ -n "${{ matrix.kpm_patch }}" ]; then
+            work="$RUNNER_TEMP/kpm"
+            mkdir -p "$work"
+            cp "$image" "$work/Image"
+            curl -fsSL -o "$work/patch_linux" "https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch/releases/download/${{ matrix.kpm_patch }}/patch_linux"
+            chmod +x "$work/patch_linux"
+            (cd "$work" && ./patch_linux)
+            test -s "$work/oImage"
+            if cmp -s "$work/Image" "$work/oImage"; then
+              echo "patch_linux left the image unchanged" >&2
+              exit 1
+            fi
+            echo "kpm patch_linux ${{ matrix.kpm_patch }}: $(sha256sum "$work/patch_linux" | cut -d' ' -f1)" | tee -a config-report.txt
+            image="$work/oImage"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
       - name: Pack boot image
         run: |
-          scripts/make_boot.sh "${{ steps.collect.outputs.image }}" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$GITHUB_WORKSPACE" "$BOOT_PARTITION_SIZE"
+          scripts/make_boot.sh "${{ steps.kpm.outputs.image }}" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$GITHUB_WORKSPACE" "$BOOT_PARTITION_SIZE"
 
       - name: Verify boot image
         run: |
