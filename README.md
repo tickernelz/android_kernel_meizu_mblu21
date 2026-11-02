@@ -1,6 +1,8 @@
 # Kernel and root for Meizu mBlu 21 (M416H)
 
-Kernel sources and a GitHub Actions pipeline that produce two flashable images for the Meizu mBlu 21: a GKI `boot` image with a root driver built in, and an `init_boot` image that loads root as a loadable module. Two root implementations are built: SukiSU-Ultra and KernelSU-Next.
+Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a root driver built in, and an `init_boot` image that loads root as a loadable module. Two root implementations are supported, SukiSU-Ultra and KernelSU-Next.
+
+**Start here: [docs/ROOT.md](docs/ROOT.md) — step-by-step root tutorial (unlock, write, manager, root hiding, back to stock).** What the bootloader actually enforces on this phone, and the measurements behind it, are in [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md).
 
 | | |
 |---|---|
@@ -11,30 +13,40 @@ Kernel sources and a GitHub Actions pipeline that produce two flashable images f
 | `init_boot` partition | 8,388,608 bytes, boot header v4, ramdisk 2,155,827 bytes in the stock image |
 | `vendor_boot` | not touched by anything here; recovery and first-stage modules stay stock |
 
+## Documentation
+
+| Page | What it covers |
+|---|---|
+| [docs/ROOT.md](docs/ROOT.md) | **Root tutorial**: prerequisites, bootloader unlock, download-mode writes, manager app, proving root, SUSFS setup, restore to stock, troubleshooting |
+| [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md) | Hardware session results: which partitions AVB verifies, what was flashed, root evidence, live partition hashes, known gaps |
+| [README.md](README.md) | This page: what is built, how it is validated, provenance, build instructions |
+
 ## Status
 
-**UNTESTED.** No image from this repository has been booted on a phone. Every release is a pre-release with `UNTESTED` in its name. The only proof so far is the static gate described below, which runs in CI on every build and is a hard failure.
+The **LKM path is tested on hardware**: both `init_boot` images boot and give root on a real mBlu 21, and the SUSFS guard module survives a reboot (details in [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md)).
+
+The **kernel path (`boot-<variant>.img`) is still UNTESTED.** Those images are built and pass the static ABI gate below, but no image signed with a foreign key has ever been written to `boot_a`. `vbmeta_a` chains `boot` to a Meizu key, so a rebuild is expected to be rejected; that expectation is unmeasured, which is why the CI releases stay pre-releases with `UNTESTED` in the name.
 
 ## Two paths
 
 | Path | What is flashed | Kernel changed | Root | SUSFS (root hiding) |
 |---|---|---|---|---|
-| LKM | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: no. KernelSU-Next: yes, through its own `susfs_guard_lkm.ko` |
-| Kernel | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko`, attached to the release |
+| LKM (**tested**) | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: yes, via the guard module. KernelSU-Next: yes, same guard module |
+| Kernel (untested) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
 
 LKM path status per variant:
 
-| Variant | LKM for `android13-5.15` | Patched `init_boot` in the release |
+| Variant | LKM for `android13-5.15` | Patched `init_boot` |
 |---|---|---|
-| KernelSU-Next | `aarch64_android13-5.15_kernelsu.ko` from release `v3.4.2` | yes: patched on the CI host with the official `ksud-x86_64-unknown-linux-musl` (`ksud boot-patch --kmi android13-5.15`) from the stock `init_boot_a.bin` |
-| SukiSU-Ultra | `lkm-aarch64-android13-5.15_kernelsu.ko` from release `v4.3.0` | no: SukiSU-Ultra publishes `ksud` only for Android, and its `ksud` source does not build for a Linux host at `v4.3.0` (the `feature` module needs Android-only modules). The image is made by the manager app on the phone, steps below |
+| KernelSU-Next | `aarch64_android13-5.15_kernelsu.ko` from release `v3.4.2` | patched on the CI host with the official `ksud-x86_64-unknown-linux-musl` (`ksud boot-patch --kmi android13-5.15`) from the stock `init_boot_a.bin` |
+| SukiSU-Ultra | `lkm-aarch64-android13-5.15_kernelsu.ko` from release `v4.3.0` | patched **on the phone** with the Android `ksud` that ships in `v4.3.0`; the result is attached to the `mblu21-root-20261102` release |
 
-Pick one path. Flashing both is not a supported combination.
+Pick one path and one variant. Flashing two root drivers is not a supported combination.
 
 Why the two implementations differ here:
 
-- SukiSU-Ultra ships SUSFS support in its `builtin` branch (its Kconfig defines `KSU_SUSFS`), but the hiding itself needs the `susfs4ksu` kernel patch, so that path is built with `patches/0001-susfs-android13-5.15.patch` applied.
-- KernelSU-Next keeps its SUSFS implementation in a loadable module (`susfs_guard_lkm.ko`, built from `kernel/susfs/` in its tree), so the kernel for that variant carries only the root driver and needs no source patch.
+- SukiSU-Ultra ships SUSFS support in its `builtin` branch (its Kconfig defines `KSU_SUSFS`), but the hiding itself needs the `susfs4ksu` kernel patch, so the kernel path is built with `patches/0001-susfs-android13-5.15.patch` applied.
+- KernelSU-Next keeps its SUSFS implementation in a loadable module (`susfs_guard_lkm.ko`, built from `kernel/susfs/` in its tree), so its kernel carries only the root driver and needs no source patch. That module also attaches to SukiSU-Ultra's LKM, which is why one guard module serves both variants.
 
 ## Static validation
 
@@ -74,103 +86,78 @@ What this does **not** prove: that the kernel boots, that the bootloader accepts
 
 ## Releases
 
-Each release holds, per variant:
+Two kinds of release:
 
-| File | Partition |
+| Release | Contents |
 |---|---|
-| `boot-<variant>.img` | `boot` |
-| `boot-<variant>.img.sha256` | - |
-| `init_boot-<variant>-lkm.img` | `init_boot` (KernelSU-Next only) |
-| `init_boot-<variant>-lkm.img.sha256` | - |
-| `susfs_guard_lkm.ko` | SUSFS module for KernelSU-Next, loaded by its manager |
-| `abi-vendor_boot.txt`, `abi-vendor_dlkm.txt`, `abi-system_dlkm.txt` | module ABI report of that build |
-| `config-report.txt` | kernel configuration of the built image |
-| `lkm-<variant>.log` | how the init_boot image was patched |
+| `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the stock `init_boot_a`/`boot_a` images for restore, the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), the SukiSU-Ultra manager APK, the patch logs, and `SHA256SUMS` |
+| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (untested), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 
 ## Install
 
+**The full procedure, including bootloader unlock and the download-mode writes this phone requires, is [docs/ROOT.md](docs/ROOT.md).** This section is the short form.
+
 Prerequisites:
 
-- Unlocked bootloader. The stock `boot` and `init_boot` are AVB chain partitions signed by Meizu; a rebuilt image cannot carry that signature, so it is signed with the public AOSP test key instead, which only an unlocked bootloader accepts.
-- A full stock backup. `boot_a.bin` and `init_boot_a.bin` from the phone are the only reliable way back. Keep them.
-- `adb` and `fastboot`.
+- Unlocked bootloader. `vbmeta` on this phone must stay Meizu-signed even when unlocked, so nothing here replaces it; `init_boot` is the one chain partition whose verification is not enforced.
+- A full stock backup. `boot_a.bin` and `init_boot_a.bin` from the phone are the only reliable way back. Both are attached to `mblu21-root-20261102` as well.
+- `adb`, and `spd_dump` from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases) for the writes. `fastboot flash` does not work on this unit.
 
 Verify a download first:
 
 ```sh
-sha256sum -c boot-sukisu-ultra.img.sha256
+sha256sum -c SHA256SUMS
 ```
 
-### Path A - kernel with the driver built in
+### Path B (recommended) - `init_boot` with the root module
+
+`init_boot` carries only the generic ramdisk; the stock kernel stays in place. This is the tested path.
 
 ```sh
-adb reboot bootloader
-fastboot getvar current-slot
-fastboot flash boot boot-sukisu-ultra.img
-fastboot reboot
+cd ~/tools/linux     # spd_dump + fdl1-dl.bin + fdl2-dl.bin live here
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a ~/mblu21-root/init_boot-sukisu-ultra-lkm.img reset
 ```
 
-The device is A/B. To cover both slots:
-
-```sh
-fastboot flash boot_a boot-sukisu-ultra.img
-fastboot flash boot_b boot-sukisu-ultra.img
-```
-
-After the first boot, install the matching manager app on the phone:
+Then install the matching manager and open it once:
 
 | Variant | Manager |
 |---|---|
-| SukiSU-Ultra | `SukiSU_v4.3.0_41100-release.apk` from `SukiSU-Ultra/SukiSU-Ultra` release `v4.3.0` |
+| SukiSU-Ultra | `SukiSU_v4.3.0_41100-release.apk` - attached to `mblu21-root-20261102`, or from `SukiSU-Ultra/SukiSU-Ultra` release `v4.3.0` |
 | KernelSU-Next | `KernelSU_Next_v3.4.2_33355-release.apk` from `KernelSU-Next/KernelSU-Next` release `v3.4.2` |
 
-### Path B - init_boot with the module left to the ramdisk
-
-`init_boot` carries only the generic ramdisk; the stock kernel stays in place.
-
-**KernelSU-Next** (image ready in the release):
+### Path A - kernel with the driver built in (untested)
 
 ```sh
-sha256sum -c init_boot-kernelsu-next-lkm.img.sha256
-adb reboot bootloader
-fastboot flash init_boot init_boot-kernelsu-next-lkm.img
-fastboot reboot
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w boot_a boot-sukisu-ultra.img reset
 ```
 
-Then install `KernelSU_Next_v3.4.2_33355-release.apk`.
+Expected to be rejected by the bootloader, because `vbmeta_a` chains `boot` to a Meizu key. Not measured; see [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md).
 
-**SukiSU-Ultra** (patched on the phone, because no host tool exists):
-
-1. Install `SukiSU_v4.3.0_41100-release.apk` on the phone. Root is not needed for this step.
-2. Copy the stock `init_boot_a.bin` to the phone: `adb push init_boot_a.bin /sdcard/Download/init_boot.img`.
-3. In the SukiSU-Ultra manager, open the install screen, choose "Select a file", pick `/sdcard/Download/init_boot.img`, and choose the KMI `android13-5.15` when asked.
-4. The manager writes the patched image to `/sdcard/Download/` (file name starts with `kernelsu_`). Pull it: `adb pull /sdcard/Download/kernelsu_patched_<date>.img`.
-5. Flash it:
+### Root hiding (SUSFS)
 
 ```sh
-adb reboot bootloader
-fastboot flash init_boot kernelsu_patched_<date>.img
-fastboot reboot
+adb push susfs_guard_lkm-module.zip /data/local/tmp/
+adb shell su -c 'ksud module install /data/local/tmp/susfs_guard_lkm-module.zip'
+adb reboot
 ```
 
-The manager menu labels can change between app versions; if they do, the official guide is <https://kernelsu.org/guide/installation.html> ("Patch boot.img with the manager"), which SukiSU-Ultra follows.
+Works on either LKM variant. Steps and verification commands are in [docs/ROOT.md](docs/ROOT.md#6-root-hiding-for-banking-apps-susfs).
 
 ## Back to stock
 
 ```sh
-adb reboot bootloader
-fastboot flash boot boot_a.bin
-fastboot flash boot_b boot_a.bin
-fastboot flash init_boot init_boot_a.bin
-fastboot flash init_boot_b init_boot_a.bin
-fastboot reboot
+cd ~/tools/linux
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a stock-init_boot_a.img reset
 ```
 
-Flashing only the partition you changed is enough; both lines are given because a slot switch would otherwise bring the modified image back.
+Flashing only the partition you changed is enough. If you also replaced `boot_a`, write `stock-boot_a.img` back the same way. Userdata is untouched by both operations.
 
 ## What is not touched
 
-- `vendor_boot`: recovery and the first-stage ramdisk and modules stay exactly as shipped, so TWRP or OrangeFox work from [android_device_meizu_mblu21-twrp](https://github.com/tickernelz/android_device_meizu_mblu21-twrp).
+- `vendor_boot`: recovery and the first-stage ramdisk stay as shipped. Recovery images live in [android_device_meizu_mblu21-recovery](https://github.com/tickernelz/android_device_meizu_mblu21-recovery), but note that this bootloader verifies `vendor_boot` against a Meizu key, so a foreign recovery does not currently load ([docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md)).
 - `vendor_dlkm`, `system_dlkm`, `vendor`, `odm`, `dtbo`, `vbmeta*`: untouched. Nothing here needs a disabled verification chain beyond the unlocked bootloader.
 - The phone itself: nothing in this repository writes to a device; images are built from sources and files in this repository.
 

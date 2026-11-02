@@ -1,0 +1,264 @@
+# Root tutorial — Meizu mBlu 21 (M416H), step by step
+
+Every command here was run on this exact phone model on 2026-11-02 and the outcome is recorded in [HARDWARE-2026-11-02.md](HARDWARE-2026-11-02.md). Read that page if you want the evidence behind a step; read this page if you just want root.
+
+**What this does and does not touch.** Only `init_boot_a` is written. `boot`, `vendor_boot`, `dtbo` and `vbmeta` keep their Meizu content, which is the whole trick: this bootloader rejects any foreign `vbmeta` and any foreign `vendor_boot`, but it does not enforce verification of `init_boot`, so a root module loaded from that ramdisk boots fine.
+
+**Cost.** Unlocking with the CVE-2022-38694 method sets a flag in `miscdata`; it does **not** wipe userdata. That was measured: after unlocking, `/data` still held 2.9 GB, 255 packages, and FBE was still active. Formatting is only needed if you later flash a different Android system.
+
+---
+
+## 0. Prepare the host
+
+```sh
+sudo dnf install -y android-tools openssl libusb1-devel gcc make
+```
+
+Download-mode USB (`1782:4d00`) needs a udev rule so `spd_dump` works without root:
+
+```sh
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="1782", ATTR{idProduct}=="4d00", TAG+="uaccess"' \
+  | sudo tee /etc/udev/rules.d/51-unisoc-download.rules
+sudo udevadm control --reload
+```
+
+Build the unlock and write tool from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases): `spd_dump`, `gen_spl-unlock`, `chsize`. Put them in one working directory together with `fdl1-dl.bin`, `fdl2-dl.bin`, `fdl2-cboot.bin`, `misc-wipe.bin`, `spl-unlock.bin` and `custom_exec_no_verify_65015f08.bin` from the same release. All later `spd_dump` commands run from that directory.
+
+### Back up first
+
+Two files decide whether you can undo everything:
+
+```sh
+mkdir -p ~/mblu21-backup
+adb shell su -c 'dd if=/dev/block/by-name/init_boot_a' > /dev/null   # only if already rooted
+```
+
+Before root you are not, so take them from download mode (or reuse a full dump you already made):
+
+```sh
+cd ~/tools/linux
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 fdl fdl2-dl.bin 0x9efffe00 exec \
+  r init_boot_a r boot_a r vendor_boot_a r vbmeta_a reset
+```
+
+That leaves `init_boot_a.bin` (8 388 608 B) and `boot_a.bin` (67 108 864 B) in the working directory. **Keep them.** They are the only reliable way back to stock.
+
+---
+
+## 1. Enter download mode
+
+This is the step people get wrong, so read it once:
+
+1. Unplug USB and power the phone **off**.
+2. Hold **Volume Up**.
+3. Plug USB in while still holding it.
+4. Keep holding for about ten seconds, then release. The screen stays black.
+
+Check from the host:
+
+```sh
+lsusb | grep 1782     # must print 1782:4d00
+```
+
+On this unit **Volume Down only reached the charging screen**; Volume Up is the combination that reaches `1782:4d00`. If the phone boots Android instead, repeat from step 1. Every `spd_dump` run drops the USB link when it finishes, so download mode is entered freshly for every write — that is normal, not a failure.
+
+---
+
+## 2. Unlock the bootloader
+
+The ROM in the phone does not route through `fastboot flashing unlock`; the Unisoc BootROM is used instead (CVE-2022-38694). Run these from the tools directory, entering download mode before each line that opens a session.
+
+Read the current SPL and U-Boot, and resign the SPL with the unlock patch:
+
+```sh
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec r splloader r uboot e splloader e splloader_bak reset
+./gen_spl-unlock splloader.bin
+mv splloader.bin u-boot-spl-16k-sign.bin
+./chsize uboot.bin
+mv uboot.bin uboot_bak.bin
+```
+
+Boot the unlock payload through U-Boot:
+
+```sh
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w uboot fdl2-cboot.bin reset
+sleep 10
+./spd_dump exec_addr 0x65015f08 fdl spl-unlock.bin 0x65000800
+```
+
+Verify the flag, then restore the stock SPL and U-Boot and clear `misc`:
+
+```sh
+./spd_dump exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 fdl fdl2-dl.bin 0x9efffe00 exec \
+    verbose 2 read_part miscdata 8192 64 m.bin reset
+xxd m.bin | head
+```
+
+- 64 zero bytes → still locked. Run the `w uboot fdl2-cboot.bin` and `fdl spl-unlock.bin` lines again.
+- A device string plus two hashes → unlocked.
+
+```sh
+./spd_dump exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 fdl fdl2-dl.bin 0x9efffe00 exec \
+    r boot w splloader u-boot-spl-16k-sign.bin w uboot uboot_bak.bin w misc misc-wipe.bin reset
+```
+
+Power the phone on normally: it boots the stock Android 14 system, now with `ro.boot.flash.locked=0` and `verifiedbootstate=orange` ("LOCK FLAG IS: UNLOCK" on the splash).
+
+---
+
+## 3. Pick one root implementation
+
+Both were booted on this phone; pick one, not both. They replace the same file (`init_boot_a`), so switching later is just flashing the other image.
+
+| | SukiSU-Ultra 4.3.0 | KernelSU-Next 3.4.2 |
+|---|---|---|
+| Image | `init_boot-sukisu-ultra-lkm.img` | `init_boot-kernelsu-next-lkm.img` |
+| SUSFS (root hiding) | yes, by installing the guard module (§6) | yes, by installing the guard module (§6) |
+| Manager app | `SukiSU_v4.3.0_41100-release.apk` | `KernelSU_Next_v3.4.2_33355-release.apk` |
+| Extra kernel extensions (KPM, CPU spoof) | yes | no |
+
+SukiSU-Ultra is the one this phone ended up running. Take the image from the release page (`mblu21-root-20261102`) and check it:
+
+```sh
+mkdir -p ~/mblu21-root && cd ~/mblu21-root
+gh release download mblu21-root-20261102 -R tickernelz/android_kernel_meizu_mblu21
+sha256sum -c SHA256SUMS
+```
+
+The two images are:
+
+| File | sha256 |
+|---|---|
+| `init_boot-sukisu-ultra-lkm.img` | `cd060b9ede002187c4b90a9f76f16247f39ff78ec1995dad229465d0ede6a5fa` |
+| `init_boot-kernelsu-next-lkm.img` | `3ed94999b93d60c2e01202ef78d7522dc42f045b766dd0de1bc6c83c07b92592` |
+
+---
+
+## 4. Write the image through download mode
+
+`fastboot flash` does **not** work on this unit: it answers `Sending … OKAY` and then fails at `Writing` with `Status read failed (No such device)`. Every write goes through `spd_dump`.
+
+Enter download mode (§1), then:
+
+```sh
+cd ~/tools/linux
+D=~/mblu21-root
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a $D/init_boot-sukisu-ultra-lkm.img reset
+```
+
+Success looks like `Write Part Done` followed by `rc=0`. If the run ends with `LIBUSB_ERROR_IO` or `find port failed`, the phone left download mode before finishing: enter it again and rerun the same command. Nothing is half-written in that case — the partition keeps its previous content.
+
+Only `init_boot_a` is written. If the phone ever boots from slot `_b`, write `init_boot_b` with the same image.
+
+---
+
+## 5. Boot and install the manager
+
+Unplug, press Power, wait for Android to finish booting. Then:
+
+```sh
+adb install ~/mblu21-root/SukiSU_v4.3.0_41100-release.apk
+```
+
+Open the app once. It should show the kernel as `LKM`, the version as `Working`, and the manager version `v4.3.0`. Grant root to the apps you want.
+
+### Prove root from the host
+
+```sh
+adb shell su -c 'id'
+```
+
+Expected:
+
+```
+uid=0(root) gid=0(root) ... context=u:r:ksu:s0
+```
+
+More checks:
+
+```sh
+adb shell su -c '/data/adb/ksud -V'        # ksud 4.3.0 (uapi: 6)
+adb shell su -c 'getenforce'               # Enforcing
+adb shell su -c 'uname -r'                 # 5.15.149-android13-8-00008-gbe074b05e5af-ab12096863
+```
+
+If `su` hangs, open the manager app: the first `su` call asks for permission and the prompt is on the phone screen, not in the terminal.
+
+SELinux stays **Enforcing** with the LKM path — there is no reason to set permissive.
+
+---
+
+## 6. Root hiding for banking apps (SUSFS)
+
+Root alone is detected by most banking apps. SUSFS hides the interesting parts: mount points, `/proc` entries, module list, kernel version, and the root driver's own symbols.
+
+Install the guard module; it is included in the same release as `susfs_guard_lkm-module.zip`:
+
+```sh
+adb push susfs_guard_lkm-module.zip /data/local/tmp/
+adb shell su -c 'ksud module install /data/local/tmp/susfs_guard_lkm-module.zip'
+adb reboot
+```
+
+After the reboot:
+
+```sh
+adb shell su -c '/data/adb/ksud susfs implementation'   # lkm
+adb shell su -c '/data/adb/ksud susfs version'          # v2.3.0
+adb shell su -c '/data/adb/ksud susfs variant'          # GKI
+adb shell su -c '/data/adb/ksud susfs status'           # true
+adb shell su -c 'cat /data/adb/ksu/log/susfs_guard.log'
+```
+
+The log must end with a line containing `rc=0 present=yes` for the boot that just happened.
+
+```sh
+adb shell su -c 'ksud susfs set-uname 5.15.149-android13-8-00008-gbe074b05e5af-ab12096863 "#1 SMP PREEMPT Tue Jul 16 15:36:08 UTC 2024"'
+```
+
+`set-uname` is the one check that proves the whole chain end to end: from a **non-root** shell, `uname -r` then reports the string you set. Put the stock pair back when you are done experimenting.
+
+Two things SUSFS does not fix, so do not chase them in this repo:
+
+- The manager app itself stays installed and visible. Hiding it is a manager-side feature.
+- Play Integrity attestation still fails; apps that call the Integrity API need a PIF-style module.
+
+---
+
+## 7. Go back to stock
+
+```sh
+cd ~/tools/linux
+./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a ~/mblu21-backup/init_boot_a.bin reset
+```
+
+Also included in the release as `stock-init_boot_a.img` (`d07159a1…`) and `stock-boot_a.img` (`3a78e139…`). Boot once and check `adb shell su -c id` fails — that is the root gone. Userdata is untouched by this operation.
+
+Leaving the bootloader unlocked does not by itself break apps; it only prints the orange warning on the splash screen.
+
+---
+
+## 8. When something goes wrong
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `lsusb` never shows `1782:4d00` | wrong key or timing | power off, hold **Volume Up**, plug in, hold ten seconds |
+| `fastboot flash` ends with `Status read failed` | fastboot is read-only here | use `spd_dump` (§4) |
+| `LIBUSB_ERROR_IO` mid-write | phone left download mode | re-enter download mode, rerun the same command |
+| stuck on the Meizu logo | the image written to `init_boot_a` is bad, or `vbmeta`/`vendor_boot` was replaced | enter download mode, write stock `init_boot_a`, and stock `vbmeta_a`/`vendor_boot_a` if you changed them |
+| boots, but no `su` | manager app not installed, or root not granted yet | install the manager (§5), open it, grant |
+| `ksud` not found | the LKM image was never written, or the patched image was overwritten by a stock restore | reflash the patched `init_boot_a` |
+| SUSFS not loaded after reboot | module missing or `ksud insmod` failed | `cat /data/adb/ksu/log/susfs_guard.log`, reinstall §6 |
+| banking app still refuses | manager visible or Play Integrity failing | §6 notes: not covered here |
+
+A phone that will not boot is not a brick: the BootROM is reachable on every power-up, so download mode plus a stock image always brings it back.
+
+## Related reading
+
+- [HARDWARE-2026-11-02.md](HARDWARE-2026-11-02.md) — what the bootloader enforces, what was measured, live partition hashes.
+- [../README.md](../README.md) — how the images are built, ABI gate, provenance.
+- [android_device_meizu_mblu21-recovery](https://github.com/tickernelz/android_device_meizu_mblu21-recovery) — recovery images (note: `vendor_boot` is AVB-enforced on this phone, so recovery does not currently load).
