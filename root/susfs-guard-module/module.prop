@@ -1,0 +1,6 @@
+id=susfs_guard_lkm
+name=SUSFS Guard LKM (mblu21)
+version=v2.3.0-gki
+versionCode=23000
+author=Zhafron
+description=Loads susfs_guard_lkm.ko for SukiSU Ultra LKM mode on Meizu mBlu 21. Data: /data/adb/ksu/log/susfs_guard.log

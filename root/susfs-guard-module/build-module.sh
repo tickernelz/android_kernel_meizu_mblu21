@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+out=${1:-susfs_guard_lkm-module.zip}
+ko=${2:-$here/susfs_guard_lkm.ko}
+if [ ! -f "$ko" ]; then
+  echo "missing $ko: download susfs_guard_lkm.ko from the release page" >&2
+  exit 1
+fi
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+install -m 644 "$here/module.prop" "$tmp/module.prop"
+install -m 755 "$here/post-fs-data.sh" "$tmp/post-fs-data.sh"
+install -m 755 "$here/service.sh" "$tmp/service.sh"
+install -m 644 "$ko" "$tmp/susfs_guard_lkm.ko"
+(
+  cd "$tmp"
+  zip -q -X "$out" module.prop post-fs-data.sh service.sh susfs_guard_lkm.ko
+)
+sha256sum "$out"
