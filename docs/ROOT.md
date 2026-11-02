@@ -22,21 +22,14 @@ echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="1782", ATTR{idProduct}=="4d00", TAG+="u
 sudo udevadm control --reload
 ```
 
-Build the unlock and write tool from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases): `spd_dump`, `gen_spl-unlock`, `chsize`. Put them in one working directory together with `fdl1-dl.bin`, `fdl2-dl.bin`, `fdl2-cboot.bin`, `misc-wipe.bin`, `spl-unlock.bin` and `custom_exec_no_verify_65015f08.bin` from the same release. All later `spd_dump` commands run from that directory.
+Build the unlock and write tools from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases): `spd_dump`, `gen_spl-unlock`, `chsize`. Keep them in one working directory, `~/mblu21-tools`, together with `fdl1-dl.bin`, `fdl2-dl.bin`, `fdl2-cboot.bin`, `misc-wipe.bin`, `spl-unlock.bin` and `custom_exec_no_verify_65015f08.bin` from the same release. Every `spd_dump` command below runs from that directory.
 
 ### Back up first
 
-Two files decide whether you can undo everything:
+Two partitions decide whether you can undo everything: `init_boot_a` (what root replaces) and `boot_a`. Before root you have no `su`, so they come out through download mode:
 
 ```sh
-mkdir -p ~/mblu21-backup
-adb shell su -c 'dd if=/dev/block/by-name/init_boot_a' > /dev/null   # only if already rooted
-```
-
-Before root you are not, so take them from download mode (or reuse a full dump you already made):
-
-```sh
-cd ~/tools/linux
+cd ~/mblu21-tools
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 fdl fdl2-dl.bin 0x9efffe00 exec \
   r init_boot_a r boot_a r vendor_boot_a r vbmeta_a reset
 ```
@@ -106,6 +99,8 @@ xxd m.bin | head
 
 Power the phone on normally: it boots the stock Android 14 system, now with `ro.boot.flash.locked=0` and `verifiedbootstate=orange` ("LOCK FLAG IS: UNLOCK" on the splash).
 
+**The unlock does not erase your data.** Measured on this phone: after unlocking, `/data` still held 2.9 GB, 255 packages were installed, and FBE was still active. The CVE-2022-38694 method only flips the flag in `miscdata`; it never runs the wipe that `fastboot flashing unlock` would. Formatting becomes necessary only when a different Android system is installed later.
+
 ---
 
 ## 3. Pick one root implementation
@@ -143,7 +138,7 @@ The two images are:
 Enter download mode (§1), then:
 
 ```sh
-cd ~/tools/linux
+cd ~/mblu21-tools
 D=~/mblu21-root
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
     fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a $D/init_boot-sukisu-ultra-lkm.img reset
@@ -231,7 +226,7 @@ Two things SUSFS does not fix, so do not chase them in this repo:
 ## 7. Go back to stock
 
 ```sh
-cd ~/tools/linux
+cd ~/mblu21-tools
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
     fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a ~/mblu21-backup/init_boot_a.bin reset
 ```
@@ -242,7 +237,28 @@ Leaving the bootloader unlocked does not by itself break apps; it only prints th
 
 ---
 
-## 8. When something goes wrong
+## 8. Verify the whole install in one go
+
+One host command proves root, the manager, SELinux and SUSFS:
+
+```sh
+adb shell su -c 'id; /data/adb/ksud -V; getenforce; /data/adb/ksud susfs implementation'
+```
+
+Expected: `uid=0(root) ... context=u:r:ksu:s0`, a `ksud` version, `Enforcing`, and `lkm` once the guard module from §6 is installed.
+
+Compare the untouched partitions against the stock hashes; only `init_boot_a` may differ:
+
+```sh
+for p in boot_a vendor_boot_a vbmeta_a dtbo_a; do
+  printf "%s " $p
+  adb shell su -c "dd if=/dev/block/by-name/$p bs=1M 2>/dev/null | sha256sum"
+done
+```
+
+Stock values measured on the reference phone: `boot_a` `3a78e1394a5c3c52252384c7a136ae3c6c4fd758f0ba4a781c91813b1352f6da`, `vendor_boot_a` `c053086cefb9845e8b604224719f71d1b2503e46fee528ba1cd7864a9ea0ed29`, `vbmeta_a` `83789a72825563cc6fe6e93a5658f2f06a962e09c6f1884d46e15ffb7b7607aa`, `dtbo_a` `71e5cae7dfabc341e4d39d7f15dadb72aec8636e68a33654b99619532936874e`. A different value means something other than `init_boot_a` was written.
+
+## 9. When something goes wrong
 
 | Symptom | Cause | Fix |
 |---|---|---|
