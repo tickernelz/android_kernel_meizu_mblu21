@@ -10,6 +10,8 @@ Every command here was run on this exact phone model on 2026-11-02 and the outco
 
 ## 0. Prepare the host
 
+### Linux host
+
 ```sh
 sudo dnf install -y android-tools openssl libusb1-devel gcc make
 ```
@@ -24,7 +26,7 @@ sudo udevadm control --reload
 
 Build the unlock and write tools from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases): `spd_dump`, `gen_spl-unlock`, `chsize`. Keep them in one working directory, `~/mblu21-tools`, together with `fdl1-dl.bin`, `fdl2-dl.bin`, `fdl2-cboot.bin`, `misc-wipe.bin`, `spl-unlock.bin` and `custom_exec_no_verify_65015f08.bin` from the same release. Every `spd_dump` command below runs from that directory.
 
-### Back up first
+### Back up first (both hosts)
 
 Two partitions decide whether you can undo everything: `init_boot_a` (what root replaces) and `boot_a`. Before root you have no `su`, so they come out through download mode:
 
@@ -35,6 +37,20 @@ cd ~/mblu21-tools
 ```
 
 That leaves `init_boot_a.bin` (8 388 608 B) and `boot_a.bin` (67 108 864 B) in the working directory. **Keep them.** They are the only reliable way back to stock.
+
+### Windows host
+
+Everything below works on Windows 10/11 with the same CVE-2022-38694 release, which ships `spd_dump.exe`, `gen_spl-unlock.exe` and `chsize.exe`.
+
+1. **Install the Unisoc USB driver.** From the release, run `SPD_Driver_R4.20.4201/Win10/DPInst64.exe` (or `Win7`/`Win8` for those systems) and accept the driver prompt. Without it, Windows never binds the download-mode device and `spd_dump.exe` reports `find port failed` forever.
+2. **Get the tools.** Extract the same `ums9230_universal_unlock_UFS` package into a short path such as `C:\mblu21\tools`; the tools write their dumps and the patched image into the current directory, so it has to be writable. That folder must contain `spd_dump.exe`, `gen_spl-unlock.exe`, `chsize.exe`, `fdl1-dl.bin`, `fdl2-dl.bin`, `fdl2-cboot.bin`, `misc-wipe.bin`, `spl-unlock.bin` and `custom_exec_no_verify_65015f08.bin`.
+3. **Get adb.** Platform-tools from Google (`adb.exe`, `fastboot.exe`); only `adb` is needed for the checks and the manager install.
+4. **Open a Command Prompt in that folder** (`cd /d C:\mblu21\tools`) and run the commands from this page without the `./` prefix: `spd_dump --wait 300 ...`.
+
+The release also ships `unlock_autopatch_9230.bat`, which runs the whole unlock sequence with pauses. It is fine for the unlock step, but it is not the whole job: patching `init_boot_a` and writing it still needs the commands below.
+
+The Windows tools need the phone in the same download mode (§1), and the same rule applies: after every `spd_dump.exe` run the phone leaves download mode, so re-enter it for the next write. `fastboot.exe flash` fails on this unit exactly as it does on Linux (`Status read failed`), so it is not used anywhere in this tutorial.
+
 
 ---
 
@@ -53,13 +69,15 @@ Check from the host:
 lsusb | grep 1782     # must print 1782:4d00
 ```
 
-On this unit **Volume Down only reached the charging screen**; Volume Up is the combination that reaches `1782:4d00`. If the phone boots Android instead, repeat from step 1. Every `spd_dump` run drops the USB link when it finishes, so download mode is entered freshly for every write — that is normal, not a failure.
+On this unit **Volume Down only reached the charging screen**; Volume Up is the combination that reaches `1782:4d00`. If the phone boots Android instead, repeat from step 1. On Windows the check is **Device Manager > Ports**, where the phone must appear as `SPRD U2S Diag (COM<n>)`; an unknown device there means the Unisoc driver from the Windows host section is missing. Every `spd_dump` run drops the USB link when it finishes, so download mode is entered freshly for every write — that is normal, not a failure.
 
 ---
 
 ## 2. Unlock the bootloader
 
 The ROM in the phone does not route through `fastboot flashing unlock`; the Unisoc BootROM is used instead (CVE-2022-38694). Run these from the tools directory, entering download mode before each line that opens a session.
+
+The commands below are written for Linux. On Windows they are identical without the `./` prefix, and the supplied `unlock_autopatch_9230.bat` runs this whole section with pauses between the steps, so it is the easier route there.
 
 Read the current SPL and U-Boot, and resign the SPL with the unlock patch:
 
@@ -144,6 +162,13 @@ D=~/mblu21-root
     fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a $D/init_boot-sukisu-ultra-lkm.img reset
 ```
 
+Windows, from the tools folder with the image copied next to the tools (`^` continues a line in `cmd.exe`):
+
+```bat
+spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 ^
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a init_boot-sukisu-ultra-lkm.img reset
+```
+
 Success looks like `Write Part Done` followed by `rc=0`. If the run ends with `LIBUSB_ERROR_IO` or `find port failed`, the phone left download mode before finishing: enter it again and rerun the same command. Nothing is half-written in that case — the partition keeps its previous content.
 
 Only `init_boot_a` is written. If the phone ever boots from slot `_b`, write `init_boot_b` with the same image.
@@ -157,6 +182,8 @@ Unplug, press Power, wait for Android to finish booting. Then:
 ```sh
 adb install ~/mblu21-root/SukiSU_v4.3.0_41100-release.apk
 ```
+
+On Windows use `adb.exe` with the folder you actually downloaded to, for example `adb install C:\mblu21\root\SukiSU_v4.3.0_41100-release.apk`. Every `adb shell` command in this tutorial works the same there as long as the single quotes are kept: `cmd.exe` passes them through, and the shell on the phone is what needs them.
 
 Open the app once. It should show the kernel as `LKM`, the version as `Working`, and the manager version `v4.3.0`. Grant root to the apps you want.
 
@@ -231,6 +258,8 @@ cd ~/mblu21-tools
     fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a ~/mblu21-backup/init_boot_a.bin reset
 ```
 
+Windows: the same command with `spd_dump` instead of `./spd_dump` and `init_boot_a.bin` in the tools folder.
+
 Also included in the release as `stock-init_boot_a.img` (`d07159a1…`) and `stock-boot_a.img` (`3a78e139…`). Boot once and check `adb shell su -c id` fails — that is the root gone. Userdata is untouched by this operation.
 
 Leaving the bootloader unlocked does not by itself break apps; it only prints the orange warning on the splash screen.
@@ -256,6 +285,8 @@ for p in boot_a vendor_boot_a vbmeta_a dtbo_a; do
 done
 ```
 
+On Windows run the same `adb shell` line once per partition and compare the hash by eye (`cmd.exe` has no `for` loop worth writing).
+
 Stock values measured on the reference phone: `boot_a` `3a78e1394a5c3c52252384c7a136ae3c6c4fd758f0ba4a781c91813b1352f6da`, `vendor_boot_a` `c053086cefb9845e8b604224719f71d1b2503e46fee528ba1cd7864a9ea0ed29`, `vbmeta_a` `83789a72825563cc6fe6e93a5658f2f06a962e09c6f1884d46e15ffb7b7607aa`, `dtbo_a` `71e5cae7dfabc341e4d39d7f15dadb72aec8636e68a33654b99619532936874e`. A different value means something other than `init_boot_a` was written.
 
 ## 9. When something goes wrong
@@ -263,6 +294,8 @@ Stock values measured on the reference phone: `boot_a` `3a78e1394a5c3c52252384c7
 | Symptom | Cause | Fix |
 |---|---|---|
 | `lsusb` never shows `1782:4d00` | wrong key or timing | power off, hold **Volume Up**, plug in, hold ten seconds |
+| Windows: no `SPRD U2S Diag (COM<n>)` appears | Unisoc driver missing, or the port is an unknown device | install `SPD_Driver_R4.20.4201/Win10/DPInst64.exe`, replug |
+| Windows: `spd_dump.exe` prints `find port failed` in a loop | phone not in download mode, or a path with spaces | re-enter download mode, move the tools to `C:\mblu21\tools` |
 | `fastboot flash` ends with `Status read failed` | fastboot is read-only here | use `spd_dump` (§4) |
 | `LIBUSB_ERROR_IO` mid-write | phone left download mode | re-enter download mode, rerun the same command |
 | stuck on the Meizu logo | the image written to `init_boot_a` is bad, or `vbmeta`/`vendor_boot` was replaced | enter download mode, write stock `init_boot_a`, and stock `vbmeta_a`/`vendor_boot_a` if you changed them |
