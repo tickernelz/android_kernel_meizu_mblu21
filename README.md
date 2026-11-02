@@ -17,7 +17,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 
 | Page | What it covers |
 |---|---|
-| [docs/ROOT.md](docs/ROOT.md) | **Root tutorial**: prerequisites, bootloader unlock, download-mode writes, manager app, proving root, SUSFS setup, restore to stock, troubleshooting |
+| [docs/ROOT.md](docs/ROOT.md) | **Root tutorial**: Linux and Windows prerequisites, bootloader unlock, download-mode writes, manager app, proving root, SUSFS setup, restore to stock, troubleshooting |
 | [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md) | Hardware session results: which partitions AVB verifies, what was flashed, root evidence, live partition hashes, known gaps |
 | [Releases](https://github.com/tickernelz/android_kernel_meizu_mblu21/releases) | `mblu21-root-20261102` holds the tested images, the stock images, the SUSFS guard module and the manager APK |
 
