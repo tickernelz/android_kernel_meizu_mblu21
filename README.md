@@ -19,7 +19,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 |---|---|
 | [docs/ROOT.md](docs/ROOT.md) | **Root tutorial**: Linux and Windows prerequisites, bootloader unlock, download-mode writes, manager app, proving root, SUSFS setup, restore to stock, troubleshooting |
 | [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md) | Hardware session results: which partitions AVB verifies, what was flashed, root evidence, live partition hashes, known gaps |
-| [docs/PLAY-INTEGRITY.md](docs/PLAY-INTEGRITY.md) | Play Integrity: which keybox and modules give MEETS_DEVICE_INTEGRITY, why MEETS_STRONG_INTEGRITY is out of reach with a shared keybox, and how to reproduce |
+| [docs/PLAY-INTEGRITY.md](docs/PLAY-INTEGRITY.md) | Play Integrity: the verdicts measured on the test phone and how they were checked |
 | [root/susfs-guard-module/](root/susfs-guard-module/) | Sources of the KernelSU module that loads the SUSFS guard at boot, plus `build-module.sh` to rebuild the zip |
 | [Releases](https://github.com/tickernelz/android_kernel_meizu_mblu21/releases) | `mblu21-root-20261102` holds the tested images, the stock images, the SUSFS guard module and the manager APK |
 
@@ -34,7 +34,7 @@ The **kernel path (`boot-<variant>.img`) does not boot on this phone.** On 2026-
 | Path | What is flashed | Kernel changed | Root | SUSFS (root hiding) |
 |---|---|---|---|---|
 | LKM (**tested**) | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: yes, via the guard module. KernelSU-Next: yes, same guard module |
-| Kernel (untested) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
+| Kernel (does not boot on this phone) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
 
 LKM path status per variant:
 
@@ -93,7 +93,7 @@ Two kinds of release:
 | Release | Contents |
 |---|---|
 | `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the stock `init_boot_a`/`boot_a` images for restore, the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), both manager APKs (SukiSU-Ultra and KernelSU-Next), the patch logs, and `SHA256SUMS` |
-| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (untested), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
+| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path does not boot on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 
 ## Install
 
@@ -128,7 +128,7 @@ Then install the matching manager and open it once:
 | SukiSU-Ultra | `SukiSU_v4.3.0_41100-release.apk` - attached to `mblu21-root-20261102`, or from `SukiSU-Ultra/SukiSU-Ultra` release `v4.3.0` |
 | KernelSU-Next | `KernelSU_Next_v3.4.2_33355-release.apk` - attached to `mblu21-root-20261102`, or from `KernelSU-Next/KernelSU-Next` release `v3.4.2` |
 
-### Path A - kernel with the driver built in (untested)
+### Path A - kernel with the driver built in (does not boot on this phone)
 
 ```sh
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
