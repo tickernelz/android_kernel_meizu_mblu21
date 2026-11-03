@@ -19,6 +19,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 |---|---|
 | [docs/ROOT.md](docs/ROOT.md) | **Root tutorial**: Linux and Windows prerequisites, bootloader unlock, download-mode writes, manager app, proving root, SUSFS setup, restore to stock, troubleshooting |
 | [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md) | Hardware session results: which partitions AVB verifies, what was flashed, root evidence, live partition hashes, known gaps |
+| [docs/PLAY-INTEGRITY.md](docs/PLAY-INTEGRITY.md) | Play Integrity: which keybox and modules give MEETS_DEVICE_INTEGRITY, why MEETS_STRONG_INTEGRITY is out of reach with a shared keybox, and how to reproduce |
 | [root/susfs-guard-module/](root/susfs-guard-module/) | Sources of the KernelSU module that loads the SUSFS guard at boot, plus `build-module.sh` to rebuild the zip |
 | [Releases](https://github.com/tickernelz/android_kernel_meizu_mblu21/releases) | `mblu21-root-20261102` holds the tested images, the stock images, the SUSFS guard module and the manager APK |
 
