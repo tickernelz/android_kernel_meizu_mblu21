@@ -21,7 +21,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 | [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md) | Hardware session results: which partitions AVB verifies, what was flashed, root evidence, live partition hashes, known gaps |
 | [docs/PLAY-INTEGRITY.md](docs/PLAY-INTEGRITY.md) | Play Integrity: the verdicts measured on the test phone and how they were checked |
 | [root/susfs-guard-module/](root/susfs-guard-module/) | Sources of the KernelSU module that loads the SUSFS guard at boot, plus `build-module.sh` to rebuild the zip |
-| [Releases](https://github.com/tickernelz/android_kernel_meizu_mblu21/releases) | `mblu21-root-20261102` holds the tested images, the stock images, the SUSFS guard module and the manager APK |
+| [Releases](https://github.com/tickernelz/android_kernel_meizu_mblu21/releases) | `mblu21-root-20261102` holds the tested images, the SUSFS guard module and the manager APKs; `mblu21-susfs-lkm-20261102` holds the SUSFS module alone. Stock images are in [android_stock_meizu_mblu21](https://github.com/tickernelz/android_stock_meizu_mblu21/releases) |
 
 ## Status
 
@@ -88,11 +88,12 @@ What this does **not** prove: that the kernel boots, that the bootloader accepts
 
 ## Releases
 
-Two kinds of release:
+Three kinds of release:
 
 | Release | Contents |
 |---|---|
-| `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the stock `init_boot_a`/`boot_a` images for restore, the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), both manager APKs (SukiSU-Ultra and KernelSU-Next), the patch logs, and `SHA256SUMS` |
+| `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), both manager APKs (SukiSU-Ultra and KernelSU-Next), the patch logs, and `SHA256SUMS` |
+| `mblu21-susfs-lkm-20261102` | **Tested on hardware.** The SUSFS guard KernelSU module alone (`susfs_guard_lkm.zip`, same bytes as `susfs_guard_lkm-module.zip` above) for SukiSU-Ultra in LKM mode, plus `SHA256SUMS` |
 | `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path does not boot on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 
 ## Install
@@ -102,7 +103,7 @@ Two kinds of release:
 Prerequisites:
 
 - Unlocked bootloader. `vbmeta` on this phone must stay Meizu-signed even when unlocked, so nothing here replaces it; `init_boot` is the one chain partition whose verification is not enforced.
-- A full stock backup. `boot_a.bin` and `init_boot_a.bin` from the phone are the only reliable way back. Both are attached to `mblu21-root-20261102` as well.
+- A full stock backup. `boot_a.bin` and `init_boot_a.bin` from the phone are the only reliable way back. The untouched U01005 images are also in the stock firmware release [mblu21-stock-U01005-20261031](https://github.com/tickernelz/android_stock_meizu_mblu21/releases/tag/mblu21-stock-U01005-20261031) as `boot_a.bin` and `init_boot_a.bin`.
 - `adb`, and `spd_dump` from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases) for the writes. `fastboot flash` does not work on this unit.
 
 Verify a download first:
@@ -152,10 +153,10 @@ Works on either LKM variant. Steps and verification commands are in [docs/ROOT.m
 ```sh
 cd ~/tools/linux
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
-    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a stock-init_boot_a.img reset
+    fdl fdl2-dl.bin 0x9efffe00 exec w init_boot_a init_boot_a.bin reset
 ```
 
-Flashing only the partition you changed is enough. If you also replaced `boot_a`, write `stock-boot_a.img` back the same way. Userdata is untouched by both operations.
+`init_boot_a.bin` is your backup, or the same file from the stock firmware release [mblu21-stock-U01005-20261031](https://github.com/tickernelz/android_stock_meizu_mblu21/releases/tag/mblu21-stock-U01005-20261031) (`d07159a1…`). Flashing only the partition you changed is enough. If you also replaced `boot_a`, write `boot_a.bin` (`3a78e139…`) back the same way. Userdata is untouched by both operations.
 
 ## What is not touched
 
@@ -172,10 +173,11 @@ Flashing only the partition you changed is enough. If you also replaced `boot_a`
 | KernelSU-Next driver (kernel path) | `github.com/KernelSU-Next/KernelSU-Next` | `dev` at `cefb048b069b7439fb4020d043de2d338dbc00fa` |
 | SUSFS patch | `gitlab.com/simonpunk/susfs4ksu` | `gki-android13-5.15` at `3f3073a9f76247af765bfeba7908f4d3c580f2bc` |
 | LKM images | flavour release assets plus a host build of `ksud` | SukiSU-Ultra `v4.3.0`, KernelSU-Next `v3.4.2` |
+| Manager APKs | unmodified upstream release assets, GPL-3.0; sources at [SukiSU-Ultra `v4.3.0`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/tree/v4.3.0) and [KernelSU-Next `v3.4.2`](https://github.com/KernelSU-Next/KernelSU-Next/tree/v3.4.2) | SHA-256 equal to the upstream assets: `a928eb57…`, `774a5511…` |
 
 `patches/0001-susfs-android13-5.15.patch` is the upstream patch set applied to `android13-5.15-2024-07_r1`. Three include-block hunks of the upstream `50_add_susfs_in_gki-android13-5.15.patch` do not apply to 5.15.149, because the file headers around them changed between sublevels; this repository carries the same two `#include <linux/susfs_def.h>` insertions and the `CL_COPY_MNT_NS` block placed by hand, and everything else is unchanged. The regenerated patch applies with zero rejects against the pinned tree, which CI re-checks on every build.
 
-`stock/init_boot_a.bin` is the stock ramdisk partition from the phone, kept here so the LKM images can be rebuilt reproducibly. It contains the generic Android ramdisk only.
+`build.yml` patches the stock `init_boot_a.bin` (the generic Android ramdisk only) downloaded from the stock firmware release [mblu21-stock-U01005-20261031](https://github.com/tickernelz/android_stock_meizu_mblu21/releases/tag/mblu21-stock-U01005-20261031) and checked against SHA-256 `d07159a1…` before use, so the LKM images rebuild reproducibly without keeping a stock image in this tree.
 
 ## Build
 

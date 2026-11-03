@@ -26,6 +26,8 @@ env:
   INIT_BOOT_PARTITION_SIZE: "8388608"
   KLEAF_FLAGS: --config=fast
   REPO_LAUNCHER_SHA256: 05f571deafd6ed6da0d20fa707dde29aa5624dbf35553d697a40dbdd4c8d178a
+  STOCK_INIT_BOOT_URL: https://github.com/tickernelz/android_stock_meizu_mblu21/releases/download/mblu21-stock-U01005-20261031/init_boot_a.bin
+  STOCK_INIT_BOOT_SHA256: d07159a1156578a86cbd8d5c240af92ce4c82a53d57f3f87532306828c2b5a9b
 
 jobs:
   kernel:
@@ -218,7 +220,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/lkm-out"
-          scripts/patch_init_boot.sh "${{ matrix.variant }}" "$RUNNER_TEMP/ksud" "$RUNNER_TEMP/kernelsu.ko" "stock/init_boot_a.bin" "$RUNNER_TEMP/lkm-out" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/init_boot_a.bin" "$STOCK_INIT_BOOT_URL"
+          echo "$STOCK_INIT_BOOT_SHA256  $RUNNER_TEMP/init_boot_a.bin" | sha256sum -c -
+          scripts/patch_init_boot.sh "${{ matrix.variant }}" "$RUNNER_TEMP/ksud" "$RUNNER_TEMP/kernelsu.ko" "$RUNNER_TEMP/init_boot_a.bin" "$RUNNER_TEMP/lkm-out" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
           image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
           python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 | tee "$RUNNER_TEMP/lkm-verify-${{ matrix.variant }}.json"
           cp "$image" "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img"

@@ -261,7 +261,7 @@ cd ~/mblu21-tools
 
 Windows: the same command with `spd_dump` instead of `./spd_dump` and `init_boot_a.bin` in the tools folder.
 
-Also included in the release as `stock-init_boot_a.img` (`d07159a1…`) and `stock-boot_a.img` (`3a78e139…`). Boot once and check `adb shell su -c id` fails — that is the root gone. Userdata is untouched by this operation.
+The same untouched images are in the stock firmware release [mblu21-stock-U01005-20261031](https://github.com/tickernelz/android_stock_meizu_mblu21/releases/tag/mblu21-stock-U01005-20261031) as `init_boot_a.bin` (`d07159a1…`) and `boot_a.bin` (`3a78e139…`). Boot once and check `adb shell su -c id` fails — that is the root gone. Userdata is untouched by this operation.
 
 Leaving the bootloader unlocked does not by itself break apps; it only prints the orange warning on the splash screen.
 
