@@ -13,6 +13,8 @@ level and the keybox policy. It replaces the combined third-party drop-in that o
 | `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then start the Tricky Store daemon from the module root |
 | `module/bin/integrity.sh` | `status`, `doctor`, `verdict`, `keybox`, `targets`, `sp` |
 | `module/bin/keybox.sh` | keybox completeness report and the opt-in fetch |
+| `module/bin/boot-verdict.sh`, `module/bin/verdict-parse.sh` | measure the verdict 60 s after every boot and append one parsed line to `/data/adb/tricky_store/verdicts.jsonl` |
+| `module/bin/fix-persist.sh` | restore `/data/property/persistent_properties` to 0600 and re-arm `persist.sys.usb.config=adb` |
 | `module/bin/targets.sh`, `module/bin/sp.sh` | target list and security patch level helpers |
 | `module/target.txt`, `module/security_patch.txt`, `module/pif.prop`, `module/integrity.conf` | the defaults the installer seeds |
 | `module/licenses/` | upstream notices and the GPL-3.0 text |
@@ -96,6 +98,21 @@ su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh sp set 2026-11-05'
 ```
 
 ## Measure
+
+Every boot measures itself: `service.sh` starts `bin/boot-verdict.sh`, which waits for
+`sys.boot_completed`, waits another 60 s, drives Simple Play Integrity Checker and appends the
+parsed result to `/data/adb/tricky_store/verdicts.jsonl`. `auto_verdict=0` in
+`/data/adb/tricky_store/integrity.conf` turns that off.
+
+```sh
+su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdicts 5'
+su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh doctor'
+```
+
+`doctor` also checks the hiding invariants: SUSFS active, no `/system/bin/su` in the default
+namespace, `persistent_properties` at 0600, and `persist.sys.usb.config` still carrying `adb`.
+
+## Measure on demand
 
 ```sh
 ./tools/measure-spic.sh

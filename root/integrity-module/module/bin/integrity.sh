@@ -36,12 +36,16 @@ doctor() {
         fi
     done
     printf '== keystore daemon\n'
-    if pgrep -f 'nice-name=TrickyStore' >/dev/null 2>&1; then
-        printf '[ok] TrickyStore daemon is running\n'
+    if pgrep -f "$MOD_DIR/service.sh" >/dev/null 2>&1; then
+        printf '[ok] the daemon loop from service.sh is alive\n'
+    elif logcat -d -v brief 2>/dev/null | grep -q 'tricky_store.MainKt'; then
+        printf '[ok] the daemon loop has been launching\n'
     else
-        printf '[fail] TrickyStore daemon is not running\n'
+        printf '[fail] the daemon loop never ran\n'
         rc=1
     fi
+    launches=$(logcat -d -v brief 2>/dev/null | grep -c 'tricky_store.MainKt')
+    printf '[info] %s daemon launches since boot (the upstream loop respawns it every 2 s)\n' "${launches:-0}"
     printf '== zygisk\n'
     if [ -d "$INTEGRITY_ROOT/data/adb/modules/zygisksu" ] || [ -d "$INTEGRITY_ROOT/data/adb/modules/zygisk_next" ]; then
         printf '[ok] a zygisk provider module is installed\n'
@@ -88,6 +92,31 @@ doctor() {
     else
         printf '[ok] no custom rom prop hook detected\n'
     fi
+    printf '== hiding\n'
+    if command -v ksud >/dev/null 2>&1 && [ "$(ksud susfs status 2>/dev/null)" = true ]; then
+        printf '[ok] SUSFS is active\n'
+    else
+        printf '[fail] SUSFS is not active\n'
+        rc=1
+    fi
+    if [ -e /system/bin/su ]; then
+        printf '[fail] /system/bin/su is visible in the default namespace\n'
+        rc=1
+    else
+        printf '[ok] no /system/bin/su in the default namespace\n'
+    fi
+    pf=/data/property/persistent_properties
+    pmode=$(stat -c '%a' "$pf" 2>/dev/null)
+    if [ "$pmode" = 600 ]; then
+        printf '[ok] persistent properties are 0600\n'
+    else
+        printf '[fail] %s is %s, init will drop every persistent property\n' "$pf" "$pmode"
+        rc=1
+    fi
+    case "$(getprop persist.sys.usb.config 2>/dev/null)" in
+        *adb*) printf '[ok] persist.sys.usb.config carries adb\n' ;;
+        *) printf '[fail] persist.sys.usb.config lost adb\n'; rc=1 ;;
+    esac
     printf '== verdict\n'
     last=$(logcat -d -v brief 2>/dev/null | grep -o 'MEETS_[A-Z_]*' | tail -n 1)
     printf '[info] last device verdict in logcat: %s\n' "${last:-none}"
@@ -115,6 +144,15 @@ case ${1:-status} in
     status) status ;;
     doctor) doctor ;;
     verdict) verdict ;;
+    verdicts)
+        shift
+        n=${1:-3}
+        if [ -f "$TS_DIR/verdicts.jsonl" ]; then
+            tail -n "$n" "$TS_DIR/verdicts.jsonl"
+        else
+            printf 'no verdicts recorded yet\n'
+        fi
+        ;;
     keybox) keybox_report ;;
     fix-adb) sh "$INTEGRITY_BIN/fix-persist.sh" && printf 'persistent properties checked\n' ;;
     keybox-mode)
@@ -128,7 +166,7 @@ case ${1:-status} in
     targets) shift; sh "$INTEGRITY_BIN/targets.sh" "$@" ;;
     sp) shift; sh "$INTEGRITY_BIN/sp.sh" "$@" ;;
     *)
-        printf 'usage: integrity.sh status|doctor|verdict|keybox|keybox-mode <mode>|fix-adb|targets <cmd>|sp <cmd>\n' >&2
+        printf 'usage: integrity.sh status|doctor|verdict|keybox|keybox-mode <mode>|fix-adb|verdicts [n]|targets <cmd>|sp <cmd>\n' >&2
         exit 2
         ;;
 esac

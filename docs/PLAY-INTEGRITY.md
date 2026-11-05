@@ -5,6 +5,24 @@ Every number below was measured on this phone, Meizu mBlu 21 (M416H), Android 17
 SUSFS guard v2.3.0-gki, NeoZygisk v2.4. The verdict comes from Simple Play Integrity
 Checker reading the raw token from Play, not from a summary screen.
 
+## What Google requires
+
+Google's June 2025 verdict rework (developer.android.com/google/play/integrity/improvements,
+summarised by bayton.org on 2026-09-14) states the two labels this phone cannot reach:
+
+* `MEETS_DEVICE_INTEGRITY` requires hardware-backed evidence that the bootloader is **locked**
+  and that the running OS is a **certified OEM image**.
+* `MEETS_STRONG_INTEGRITY` requires that plus a security patch level from the last year on every
+  partition, vendor included.
+* `MEETS_BASIC_INTEGRITY` is the one label allowed on an unlocked, rooted device, as long as key
+  attestation is present at all.
+
+The bootloader of this unit cannot be locked again with its own key: `vbmeta_a` chains to the
+Meizu key `d46eb3be` and `vendor_boot` to `4fce36c7`, and the 2026-11-03 attempt stopped at the
+boot logo. The only way to produce a verifying "locked" claim would be an attestation chain signed
+by an unrevoked Google keybox, which is another device's private key material; no such keybox is
+carried by this project and none was fetched.
+
 ## Result
 
 | Configuration | Keybox in use | Keystore interposer | Device verdict |
@@ -74,6 +92,21 @@ The module repairs this on every boot (`bin/fix-persist.sh`, called from
 control (0666 in, 0600 out). Measured after the fix: a reboot with the phone untouched
 brought `adb devices` back online 38 s after `adb reboot`, with no `keyguardGoingAway`
 or Settings activity in logcat before it.
+
+## Sustained BASIC, and the other invariants
+
+The shipped configuration (`keybox_mode=software`, `auto_keybox=0`, target list of four
+packages, `fix-persist.sh` active) produced, boot after boot,
+`deviceRecognitionVerdict: ["MEETS_BASIC_INTEGRITY"]` with
+`appRecognitionVerdict: PLAY_RECOGNIZED` and `appLicensingVerdict: LICENSED` — including three
+consecutive boots on the earlier keybox configuration. `bin/boot-verdict.sh` now repeats that
+measurement 60 s after every boot and appends the parsed result to
+`/data/adb/tricky_store/verdicts.jsonl`, so each boot documents itself instead of relying on a
+person to press a button; `bin/integrity.sh verdicts 5` prints the tail.
+
+`bin/integrity.sh doctor` also checks the local hiding invariants that matter more than a verdict
+here: SUSFS active, no `/system/bin/su` in the default namespace, `persistent_properties` at
+`0600`, and `persist.sys.usb.config` still carrying `adb`.
 
 ## How the verdict was read
 

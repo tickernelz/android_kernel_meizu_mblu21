@@ -92,5 +92,48 @@ chmod 0666 "$T/data/property/persistent_properties"
 sh "$mod/post-fs-data.sh"
 [ "$(stat -c %a "$T/data/property/persistent_properties")" = 600 ] && ok "post-fs-data restores persistent_properties to 0600" || no "post-fs-data restores persistent_properties to 0600"
 
-printf '\n%s passed, %s failed\n' "$pass" "$fail"
+fresh
+mkdir -p "$T/data/property"
+printf 'x' > "$T/data/property/persistent_properties"
+chmod 0666 "$T/data/property/persistent_properties"
+printf '#!/bin/sh\necho\n' > "$T/bin/getprop"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" > %s/setprop-args\n' "$T" > "$T/bin/setprop"
+printf '#!/bin/sh\nprintf y > %s/pp.new; chmod 666 %s/pp.new; mv %s/pp.new %s/data/property/persistent_properties\n' "$T" "$T" "$T" "$T" > "$T/bin/resetprop"
+chmod 755 "$T/bin/getprop" "$T/bin/setprop" "$T/bin/resetprop"
+( export PATH=$T/bin:$PATH; sh "$mod/bin/fix-persist.sh" >/dev/null )
+[ "$(stat -c %a "$T/data/property/persistent_properties")" = 600 ] && ok "re-arming adb leaves persistent_properties at 0600" || no "re-arming adb leaves persistent_properties at 0600"
+grep -qx 'persist.sys.usb.config adb' "$T/setprop-args" 2>/dev/null && ok "lost adb config is re-armed through init" || no "lost adb config is re-armed through init"
+fresh
+cat > "$T/fixture.log" <<'EOF'
+I/System.out( 8414): {
+I/System.out( 8414):   "appIntegrity": {
+I/System.out( 8414):     "appRecognitionVerdict": "PLAY_RECOGNIZED",
+I/System.out( 8414):   },
+I/System.out( 8414):   "deviceIntegrity": {
+I/System.out( 8414):     "deviceRecognitionVerdict": ["MEETS_BASIC_INTEGRITY", "MEETS_DEVICE_INTEGRITY"],
+I/System.out( 8414):   },
+I/System.out( 8414):   "accountDetails": {
+I/System.out( 8414):     "appLicensingVerdict": "LICENSED"
+I/System.out( 8414):   },
+I/System.out( 8414): }
+EOF
+line=$(sh "$mod/bin/verdict-parse.sh" < "$T/fixture.log")
+printf '%s' "$line" | grep -q '"device":"MEETS_BASIC_INTEGRITY,MEETS_DEVICE_INTEGRITY"' && ok "verdict-parse keeps every device verdict" || no "verdict-parse keeps every device verdict (got $line)"
+printf '%s' "$line" | grep -q '"app":"PLAY_RECOGNIZED"' && ok "verdict-parse reads the app verdict" || no "verdict-parse reads the app verdict"
+printf '%s' "$line" | grep -q '"licensing":"LICENSED"' && ok "verdict-parse reads the licensing verdict" || no "verdict-parse reads the licensing verdict"
+line=$(printf 'nothing useful
+' | sh "$mod/bin/verdict-parse.sh")
+printf '%s' "$line" | grep -q '"device":"none"' && ok "verdict-parse marks a missing verdict" || no "verdict-parse marks a missing verdict"
+
+fresh
+printf 'keybox_mode=auto
+auto_verdict=0
+' > "$T/data/adb/tricky_store/integrity.conf"
+rm -f "$T/data/adb/tricky_store/verdicts.jsonl"
+INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
+[ -f "$T/data/adb/tricky_store/verdicts.jsonl" ] && no "auto_verdict=0 records nothing" || ok "auto_verdict=0 records nothing"
+
+printf '
+%s passed, %s failed
+' "$pass" "$fail"
 [ "$fail" -eq 0 ]
