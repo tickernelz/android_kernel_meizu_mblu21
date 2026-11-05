@@ -110,9 +110,23 @@ The last rule is the one that catches a half-served or spliced file. A rejected 
 never touches the keybox in use: the engine keeps `keybox.xml`, and when that file is
 itself unusable it restores `keybox.prev.xml` (`bin/keybox-fetch.sh heal`).
 
+Transport rules: `curl` runs with `--proto '=https' --proto-redir '=https'`, so a 302 to
+plain http is refused. When `curl` is absent the busybox `wget` fallback is only used with
+`keybox_sha256` set, because that wget build reports `TLS certificate validation not
+implemented`; without the pin the fetch is refused with a log line instead of trusting the
+connection.
+
+Scratch space comes from the first writable candidate: `INTEGRITY_SCRATCH`,
+`$TS_DIR`, `TMPDIR`, `/data/local/tmp`, then the directory of the file being validated. Nothing
+depends on `/tmp`, which a boot-time module context does not have.
+
+`heal` runs only when `auto_keybox=1` **and** a source is configured **and** `keybox.xml`
+exists, so the default configuration never rewrites the owner keybox at boot.
+
 Every attempt writes exactly one log line with the result and the reason; the replaced
 file becomes `keybox.prev.xml`, and `keybox.source` records the source, the timestamp and
-the sha256. Neither the log nor the stamp ever contains key material:
+the sha256. The state file is rewritten whole, so a source containing `|`, `&` or a
+backslash cannot corrupt it. Neither the log nor the stamp ever contains key material:
 
     keybox fetch rejected: invalid no-rsa
     keybox installed from file:///data/local/tmp/kb.xml sha256=… valid size=5843 keys=2 certs=4 ec=1 rsa=1

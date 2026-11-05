@@ -182,6 +182,61 @@ cmp -s "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.prev.xml" && ok "heal br
 sh "$mod/bin/keybox-validate.sh" "$T/data/adb/tricky_store/keybox.xml" >/dev/null 2>&1 && ok "the healed keybox validates" || no "the healed keybox validates"
 fetch status >/dev/null 2>&1 && ok "status prints without a configured source" || no "status prints without a configured source"
 
+out=$(env -u TMPDIR INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator works with TMPDIR unset" || no "validator works with TMPDIR unset ($out)"
+out=$(TMPDIR=$FX/does-not-exist INTEGRITY_SCRATCH=$FX/also-missing INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator falls back when the scratch candidates are missing" || no "validator falls back when the scratch candidates are missing ($out)"
+leftovers=$(find "$T" -name '.keybox-validate*' 2>/dev/null | wc -l | tr -d ' ')
+[ "$leftovers" = 0 ] && ok "validator leaves no scratch directory behind" || no "validator leaves no scratch directory behind (found $leftovers)"
+
+fresh
+printf 'auto_keybox=0\n' > "$T/data/adb/tricky_store/integrity.conf"
+printf 'garbage' > "$T/data/adb/tricky_store/keybox.xml"
+cp "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.prev.xml"
+before=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" heal >/dev/null 2>&1
+after=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+[ "$before" = "$after" ] && ok "heal does nothing while auto_keybox=0" || no "heal does nothing while auto_keybox=0"
+
+printf 'auto_keybox=1\nkeybox_url=\nkeybox_file=\n' > "$T/data/adb/tricky_store/integrity.conf"
+INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" heal >/dev/null 2>&1
+after=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+[ "$before" = "$after" ] && ok "heal does nothing without a configured source" || no "heal does nothing without a configured source"
+
+printf 'auto_keybox=1\nkeybox_url=file://%s/valid.xml\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
+INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" heal >/dev/null 2>&1
+INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$T/data/adb/tricky_store/keybox.xml" >/dev/null 2>&1 && ok "heal restores the previous keybox once the engine is on" || no "heal restores the previous keybox once the engine is on"
+
+if command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+    fresh
+    mkdir -p "$T/tls"
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$T/tls/ca.key" -out "$T/tls/ca.pem" -subj "/CN=ZHA4968 test CA" -days 2 >/dev/null 2>&1
+    openssl req -new -newkey rsa:2048 -nodes -keyout "$T/tls/server.key" -out "$T/tls/server.csr" -subj "/CN=127.0.0.1" >/dev/null 2>&1
+    openssl x509 -req -in "$T/tls/server.csr" -CA "$T/tls/ca.pem" -CAkey "$T/tls/ca.key" -CAcreateserial -out "$T/tls/server.pem" -days 2 -extfile <(printf 'subjectAltName=IP:127.0.0.1') >/dev/null 2>&1
+    python3 "$here/https-server.py" "$T/tls/server.pem" "$T/tls/server.key" "$T/tls/ports.json" "$FX/valid.xml" &
+    tls_pid=$!
+    trap 'kill $tls_pid 2>/dev/null' EXIT
+    i=0
+    while [ ! -s "$T/tls/ports.json" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+    tls_port=$(sed -n 's/.*"tls": *\([0-9]*\).*/\1/p' "$T/tls/ports.json")
+    cp "$FX/ec-only.xml" "$T/data/adb/tricky_store/keybox.xml"
+    printf 'auto_keybox=1\nkeybox_url=https://127.0.0.1:%s/valid.xml\n' "$tls_port" > "$T/data/adb/tricky_store/integrity.conf"
+    CURL_CA_BUNDLE=$T/tls/ca.pem INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" now >/dev/null 2>&1
+    cmp -s "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "an https source with a trusted chain installs" || no "an https source with a trusted chain installs"
+    before=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+    printf 'auto_keybox=1\nkeybox_url=https://127.0.0.1:%s/redir\n' "$tls_port" > "$T/data/adb/tricky_store/integrity.conf"
+    CURL_CA_BUNDLE=$T/tls/ca.pem INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" now >/dev/null 2>&1
+    after=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+    [ "$before" = "$after" ] && ok "an https redirect to plain http is refused" || no "an https redirect to plain http is refused"
+    grep -q 'keybox fetch failed' "$T/data/adb/tricky_store/integrity.log" && ok "the refused redirect is logged" || no "the refused redirect is logged"
+    printf 'auto_keybox=1\nkeybox_url=https://127.0.0.1:%s/valid.xml\nkeybox_sha256=deadbeef\n' "$tls_port" > "$T/data/adb/tricky_store/integrity.conf"
+    CURL_CA_BUNDLE=$T/tls/ca.pem INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" now >/dev/null 2>&1
+    after=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+    [ "$before" = "$after" ] && ok "a pinned https source with the wrong hash is refused" || no "a pinned https source with the wrong hash is refused"
+    kill $tls_pid 2>/dev/null
+    trap - EXIT
+else
+    ok "https cases skipped (python3 or openssl missing)"
+fi
+
 out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q 'validation: valid' && ok "the report shows the validation verdict" || no "the report shows the validation verdict ($out)"
 rm -f "$T/data/adb/tricky_store/keybox.xml"
