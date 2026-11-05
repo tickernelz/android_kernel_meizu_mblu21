@@ -13,8 +13,16 @@ state_get() {
 }
 
 state_set() {
-    [ -f "$STATE" ] || : > "$STATE"
-    file_set "$STATE" "$1" "$2"
+    key=$1
+    value=$(printf '%s' "$2" | tr -d '\n')
+    tmp_state=$STATE.tmp.$$
+    if [ -f "$STATE" ]; then
+        grep -v "^${key}=" "$STATE" > "$tmp_state" 2>/dev/null || : > "$tmp_state"
+    else
+        : > "$tmp_state"
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$tmp_state"
+    mv "$tmp_state" "$STATE"
 }
 
 interval_hours() {
@@ -50,8 +58,9 @@ fetch_to() {
     case $src in
         https://*)
             if command -v curl >/dev/null 2>&1; then
-                curl -fsSL --max-time 30 -o "$dest" "$src"
+                curl -fsSL --max-time 30 --proto '=https' --proto-redir '=https' -o "$dest" "$src"
             elif command -v wget >/dev/null 2>&1; then
+                [ -n "$(conf_get keybox_sha256)" ] || return 5
                 wget -q -O "$dest" --timeout=30 "$src"
             else
                 return 4
@@ -84,6 +93,13 @@ restore_prev() {
     cp -f "$PREV" "$KEYBOX"
     chmod 600 "$KEYBOX" 2>/dev/null
     log_line "rolled back to keybox.prev.xml ($out)"
+}
+
+run_heal() {
+    [ "$(conf_get auto_keybox)" = 1 ] || return 0
+    [ -n "$(source_value)" ] || return 0
+    [ -f "$KEYBOX" ] || return 0
+    self_heal
 }
 
 self_heal() {
@@ -121,6 +137,12 @@ attempt() {
             rm -f "$tmp"
             state_set last_result no-fetcher
             log_line 'keybox fetch failed: neither curl nor wget is present'
+            return 0
+            ;;
+        5)
+            rm -f "$tmp"
+            state_set last_result untrusted-fetcher
+            log_line 'keybox fetch refused: this wget build does not validate TLS certificates, so keybox_sha256 is required'
             return 0
             ;;
         1)
@@ -207,17 +229,9 @@ status() {
         printf 'installed_from: %s\n' "$(file_get "$SRC_STAMP" source)"
         printf 'installed_at: %s\n' "$(file_get "$SRC_STAMP" ts)"
     fi
-    if out=$(sh "$INTEGRITY_BIN/keybox-validate.sh" "$KEYBOX" 2>/dev/null); then
-        printf 'current: %s\n' "$out"
-    else
-        printf 'current: %s\n' "$out"
-    fi
+    printf 'current: %s\n' "$(sh "$INTEGRITY_BIN/keybox-validate.sh" "$KEYBOX" 2>/dev/null)"
     if [ -f "$PREV" ]; then
-        if out=$(sh "$INTEGRITY_BIN/keybox-validate.sh" "$PREV" 2>/dev/null); then
-            printf 'previous: %s\n' "$out"
-        else
-            printf 'previous: %s\n' "$out"
-        fi
+        printf 'previous: %s\n' "$(sh "$INTEGRITY_BIN/keybox-validate.sh" "$PREV" 2>/dev/null)"
     else
         printf 'previous: none\n'
     fi
@@ -233,7 +247,7 @@ loop() {
 case $1 in
     run) run ;;
     now) attempt "$(source_value)" ;;
-    heal) self_heal ;;
+    heal) run_heal ;;
     status) status ;;
     loop) loop ;;
     *)
