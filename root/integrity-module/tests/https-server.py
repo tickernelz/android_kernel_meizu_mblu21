@@ -4,7 +4,7 @@ import ssl
 import sys
 import threading
 
-certfile, keyfile, outfile, fixture = sys.argv[1:5]
+certfile, keyfile, outfile, fixture, plain_fixture = sys.argv[1:6]
 
 
 def serve(handler, tls):
@@ -19,7 +19,7 @@ def serve(handler, tls):
 
 class Plain(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = open(fixture, "rb").read()
+        body = open(plain_fixture, "rb").read()
         self.send_response(200)
         self.send_header("Content-Type", "text/xml")
         self.send_header("Content-Length", str(len(body)))

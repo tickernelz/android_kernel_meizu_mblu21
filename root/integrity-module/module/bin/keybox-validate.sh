@@ -35,7 +35,7 @@ root=$(grep -o '<[A-Za-z][A-Za-z0-9]*' "$f" 2>/dev/null | head -n 1 | tr -d '<')
 grep -q '</AndroidAttestation>' "$f" 2>/dev/null || fail root-unclosed
 
 scratch_root() {
-    for cand in "${INTEGRITY_SCRATCH:-}" "${INTEGRITY_ROOT:+$INTEGRITY_ROOT/data/adb/tricky_store}" "${TMPDIR:-}" /data/local/tmp "$(dirname -- "$f")"; do
+    for cand in "${INTEGRITY_SCRATCH:-}" "$INTEGRITY_ROOT/data/adb/tricky_store" "${TMPDIR:-}" /data/local/tmp "$(dirname -- "$f")"; do
         [ -n "$cand" ] || continue
         mkdir -p "$cand" 2>/dev/null
         probe=$cand/.keybox-validate.probe.$$
@@ -52,7 +52,8 @@ root=$(scratch_root) || fail scratch
 tmp=$root/.keybox-validate.$$
 rm -rf "$tmp"
 mkdir -p "$tmp" 2>/dev/null || fail scratch
-trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; exit 1' INT TERM HUP
 
 if ! awk -v out="$tmp" -f "$INTEGRITY_BIN/keybox-split.awk" "$f" > "$tmp/split.txt" 2>/dev/null; then
     reason=$(sed -n 's/^error //p' "$tmp/split.txt" | head -n 1)
