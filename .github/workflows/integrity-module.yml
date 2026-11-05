@@ -1,0 +1,51 @@
+name: integrity-module
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'root/integrity-module/**'
+      - '.github/workflows/integrity-module.yml'
+  pull_request:
+    paths:
+      - 'root/integrity-module/**'
+      - '.github/workflows/integrity-module.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integrity-module-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  module:
+    name: module zip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: shellcheck
+        run: |
+          shellcheck -S warning \
+            root/integrity-module/build-module.sh \
+            root/integrity-module/tests/run.sh \
+            root/integrity-module/module/*.sh \
+            root/integrity-module/module/bin/*.sh \
+            root/integrity-module/tools/*.sh
+
+      - name: tests
+        run: bash root/integrity-module/tests/run.sh
+
+      - name: build
+        run: bash root/integrity-module/build-module.sh "$RUNNER_TEMP/mblu21-integrity.zip" "$RUNNER_TEMP/upstream"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mblu21-integrity
+          path: ${{ runner.temp }}/mblu21-integrity.zip
+          if-no-files-found: error
