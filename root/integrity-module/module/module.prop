@@ -1,6 +1,6 @@
 id=playintegrityfix
 name=mblu21 integrity
-version=v1.0.0
-versionCode=10000
+version=v1.1.0
+versionCode=10100
 author=Zhafron
-description=TrickyStore keystore attestation plus Play Integrity Fork props for the Meizu mBlu 21. Keeps the keybox already on the device and fetches one only when auto_keybox=1 in /data/adb/tricky_store/integrity.conf.
+description=TrickyStore keystore attestation plus Play Integrity Fork props for the Meizu mBlu 21. Keeps the keybox already on the device and, with auto_keybox=1, fetches one on a schedule from https:// or file:// only, validating the ecdsa and rsa chains before it replaces anything.

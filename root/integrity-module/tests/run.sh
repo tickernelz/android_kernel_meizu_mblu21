@@ -5,6 +5,7 @@ mod=$here/../module
 export INTEGRITY_BIN=$mod/bin
 pass=0
 fail=0
+FX=$(mktemp -d)
 
 ok() { printf 'ok   %s\n' "$1"; pass=$((pass + 1)); }
 no() { printf 'FAIL %s\n' "$1"; fail=$((fail + 1)); }
@@ -35,36 +36,162 @@ c=$(grep -cxF com.google.android.gms "$T/data/adb/tricky_store/target.txt")
 [ "$c" -eq 1 ] && ok "targets add is idempotent" || no "targets add is idempotent (got $c)"
 
 fresh
-printf 'auto_keybox=0\nkeybox_url=http://example.invalid/kb.xml\n' > "$T/data/adb/tricky_store/integrity.conf"
-mkdir -p "$T/bin"
+mkdir -p "$T/bin" "$FX"
 printf '#!/bin/sh\ntouch %s/curl-called\n' "$T" > "$T/bin/curl"
 chmod 755 "$T/bin/curl"
+printf 'auto_keybox=0\nkeybox_url=http://example.invalid/kb.xml\n' > "$T/data/adb/tricky_store/integrity.conf"
 ( export PATH=$T/bin:$PATH; . "$mod/bin/keybox.sh"; keybox_auto_apply >/dev/null 2>&1 )
 [ -e "$T/curl-called" ] && no "auto_keybox=0 never fetches" || ok "auto_keybox=0 never fetches"
 
-printf 'auto_keybox=1\nkeybox_url=\n' > "$T/data/adb/tricky_store/integrity.conf"
+rm -f "$T/curl-called"
+printf 'auto_keybox=1\n' > "$T/data/adb/tricky_store/integrity.conf"
 ( export PATH=$T/bin:$PATH; . "$mod/bin/keybox.sh"; keybox_auto_apply >/dev/null 2>&1 )
-[ -e "$T/curl-called" ] && no "empty keybox_url never fetches" || ok "empty keybox_url never fetches"
-grep -q 'keybox_url is empty' "$T/data/adb/tricky_store/integrity.log" && ok "empty keybox_url is logged" || no "empty keybox_url is logged"
+[ -e "$T/curl-called" ] && no "no configured source never fetches" || ok "no configured source never fetches"
+
+mkec() {
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$FX/$1-ca.key" -out "$FX/$1-ca.pem" -subj "/CN=$3" -days 30 >/dev/null 2>&1
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$FX/$1-leaf.key" -out "$FX/$1-leaf.csr" -subj "/CN=$2" >/dev/null 2>&1
+    openssl x509 -req -in "$FX/$1-leaf.csr" -CA "$FX/$1-ca.pem" -CAkey "$FX/$1-ca.key" -CAcreateserial -out "$FX/$1-leaf.pem" -days 30 >/dev/null 2>&1
+}
+
+mkrsa() {
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$FX/$1-ca.key" -out "$FX/$1-ca.pem" -subj "/CN=$3" -days 30 >/dev/null 2>&1
+    openssl req -new -newkey rsa:2048 -nodes -keyout "$FX/$1-leaf.key" -out "$FX/$1-leaf.csr" -subj "/CN=$2" >/dev/null 2>&1
+    openssl x509 -req -in "$FX/$1-leaf.csr" -CA "$FX/$1-ca.pem" -CAkey "$FX/$1-ca.key" -CAcreateserial -out "$FX/$1-leaf.pem" -days 30 >/dev/null 2>&1
+}
+
+emit_key() {
+    printf '    <Key algorithm="%s">\n      <PrivateKey format="pem">\n' "$1"
+    sed 's/^/        /' "$2"
+    printf '      </PrivateKey>\n      <CertificateChain>\n        <NumberOfCertificates>2</NumberOfCertificates>\n        <Certificate format="pem">\n'
+    sed 's/^/          /' "$3"
+    printf '        </Certificate>\n        <Certificate format="pem">\n'
+    sed 's/^/          /' "$4"
+    printf '        </Certificate>\n      </CertificateChain>\n    </Key>\n'
+}
+
+open_box() {
+    printf '<?xml version="1.0"?>\n<AndroidAttestation>\n    <NumberOfKeyboxes>1</NumberOfKeyboxes>\n    <Keybox DeviceID="%s">\n' "$1"
+}
+
+close_box() {
+    printf '    </Keybox>\n</AndroidAttestation>\n'
+}
+
+mkec ecleaf "Test EC Leaf" "Test EC CA"
+mkec ecother "Test Other Leaf" "Test Other CA"
+mkrsa rsaleaf "Test RSA Leaf" "Test RSA CA"
+
+{
+    open_box sw
+    emit_key ecdsa "$FX/ecleaf-leaf.key" "$FX/ecleaf-leaf.pem" "$FX/ecleaf-ca.pem"
+    emit_key rsa "$FX/rsaleaf-leaf.key" "$FX/rsaleaf-leaf.pem" "$FX/rsaleaf-ca.pem"
+    close_box
+} > "$FX/valid.xml"
+
+{
+    open_box sw2
+    emit_key ecdsa "$FX/ecleaf-leaf.key" "$FX/ecleaf-leaf.pem" "$FX/ecleaf-ca.pem"
+    emit_key rsa "$FX/rsaleaf-leaf.key" "$FX/rsaleaf-leaf.pem" "$FX/rsaleaf-ca.pem"
+    close_box
+} > "$FX/valid2.xml"
+
+{
+    open_box sw
+    emit_key ecdsa "$FX/ecleaf-leaf.key" "$FX/ecleaf-leaf.pem" "$FX/ecleaf-ca.pem"
+    close_box
+} > "$FX/ec-only.xml"
+
+{
+    open_box sw
+    emit_key ecdsa "$FX/ecleaf-leaf.key" "$FX/ecleaf-leaf.pem" "$FX/ecother-ca.pem"
+    emit_key rsa "$FX/rsaleaf-leaf.key" "$FX/rsaleaf-leaf.pem" "$FX/rsaleaf-ca.pem"
+    close_box
+} > "$FX/broken-chain.xml"
+
+{
+    printf '<?xml version="1.0"?>\n<!DOCTYPE foo [<!ENTITY x "y">]>\n<AndroidAttestation>\n    <Keybox DeviceID="sw">\n'
+    printf '%*s\n' 600 ''
+    printf '    </Keybox>\n</AndroidAttestation>\n'
+} > "$FX/doctype.xml"
+
+{
+    printf '<?xml version="1.0"?>\n<AndroidAttestation>\n'
+    printf '%*s\n' 600 ''
+    printf '</AndroidAttestation>\n'
+} > "$FX/no-key.xml"
+
+validate() { sh "$mod/bin/keybox-validate.sh" "$1" 2>&1; }
+
+out=$(validate "$FX/valid.xml") && ok "validator accepts an ecdsa+rsa box with linked chains" || no "validator accepts an ecdsa+rsa box with linked chains ($out)"
+printf '%s' "$out" | grep -q 'ec=1 rsa=1' && ok "validator counts one key per algorithm" || no "validator counts one key per algorithm ($out)"
+
+if out=$(validate "$FX/ec-only.xml"); then no "validator rejects an ecdsa-only box"; else ok "validator rejects an ecdsa-only box"; fi
+printf '%s' "$out" | grep -q 'invalid no-rsa' && ok "ecdsa-only rejection names the missing rsa key" || no "ecdsa-only rejection names the missing rsa key ($out)"
+
+if out=$(validate "$FX/broken-chain.xml"); then no "validator rejects a certificate chain that does not link"; else ok "validator rejects a certificate chain that does not link"; fi
+printf '%s' "$out" | grep -q 'invalid chain-link-1-1' && ok "broken chain is reported per key and hop" || no "broken chain is reported per key and hop ($out)"
+
+if out=$(validate "$FX/doctype.xml"); then no "validator rejects a DOCTYPE"; else ok "validator rejects a DOCTYPE"; fi
+printf '%s' "$out" | grep -q 'invalid doctype' && ok "doctype rejection has its own reason" || no "doctype rejection has its own reason ($out)"
+
+if out=$(validate "$FX/no-key.xml"); then no "validator rejects a box without keys"; else ok "validator rejects a box without keys"; fi
+printf '%s' "$out" | grep -q 'invalid no-key' && ok "keyless box rejection has its own reason" || no "keyless box rejection has its own reason ($out)"
+
+if out=$(sh "$mod/bin/keybox-validate.sh" --structural "$FX/ec-only.xml"); then ok "structural mode accepts an incomplete owner keybox"; else no "structural mode accepts an incomplete owner keybox ($out)"; fi
+if out=$(validate "$FX/ec-only.xml"); then no "strict mode still rejects the same file"; else ok "strict mode still rejects the same file"; fi
+
+fetch() { INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" "$@"; }
 
 fresh
-printf 'auto_keybox=1\nkeybox_url=http://example.invalid/kb.xml\nkeybox_sha256=deadbeef\n' > "$T/data/adb/tricky_store/integrity.conf"
-printf '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = -o ]; then shift; printf "<xml/>" > "$1"; fi; shift; done\n' > "$T/bin/curl"
-chmod 755 "$T/bin/curl"
-( export PATH=$T/bin:$PATH; . "$mod/bin/keybox.sh"; keybox_auto_apply >/dev/null 2>&1 )
-[ -e "$T/data/adb/tricky_store/keybox.xml" ] && no "sha256 mismatch keeps the old keybox" || ok "sha256 mismatch keeps the old keybox"
-grep -q 'sha256 mismatch' "$T/data/adb/tricky_store/integrity.log" && ok "sha256 mismatch is logged" || no "sha256 mismatch is logged"
-grep -q 'plain HTTP' "$T/data/adb/tricky_store/integrity.log" && ok "http source is called out" || no "http source is called out"
+cp "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.xml"
+printf 'auto_keybox=1\nkeybox_url=file://%s/valid2.xml\nkeybox_fetch_interval_h=24\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
+fetch run >/dev/null 2>&1
+cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "file:// fetch installs a validated keybox" || no "file:// fetch installs a validated keybox"
+cmp -s "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.prev.xml" && ok "the replaced keybox is kept as keybox.prev.xml" || no "the replaced keybox is kept as keybox.prev.xml"
+grep -q 'keybox installed from file://' "$T/data/adb/tricky_store/integrity.log" && ok "an install writes one log line" || no "an install writes one log line"
+grep -q 'BEGIN CERTIFICATE' "$T/data/adb/tricky_store/integrity.log" && no "the log never carries keybox content" || ok "the log never carries keybox content"
 
-fresh
-printf '<Key algorithm="ecdsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
-out=$(. "$mod/bin/keybox.sh"; keybox_report)
-printf '%s' "$out" | grep -q 'no rsa key' && ok "ecdsa-only keybox is called incomplete" || no "ecdsa-only keybox is called incomplete"
+before=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+fetch run >/dev/null 2>&1
+after=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+[ "$before" = "$after" ] && ok "a second run inside the interval does not touch the keybox" || no "a second run inside the interval does not touch the keybox"
+
+printf 'auto_keybox=1\nkeybox_url=http://example.invalid/kb.xml\n' > "$T/data/adb/tricky_store/integrity.conf"
+fetch now >/dev/null 2>&1
+cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "a plain http source is refused and the keybox survives" || no "a plain http source is refused and the keybox survives"
+grep -q 'is plain http' "$T/data/adb/tricky_store/integrity.log" && ok "the http refusal is logged with the reason" || no "the http refusal is logged with the reason"
+
+printf 'auto_keybox=1\nkeybox_url=file://%s/ec-only.xml\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
+fetch now >/dev/null 2>&1
+cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "a keybox that fails validation never replaces the working one" || no "a keybox that fails validation never replaces the working one"
+grep -q 'keybox fetch rejected: invalid no-rsa' "$T/data/adb/tricky_store/integrity.log" && ok "the validation failure is logged with its reason" || no "the validation failure is logged with its reason"
+
+printf 'auto_keybox=1\nkeybox_url=file://%s/broken-chain.xml\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
+fetch now >/dev/null 2>&1
+cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "a broken chain never replaces the working keybox" || no "a broken chain never replaces the working keybox"
+
+printf 'auto_keybox=1\nkeybox_url=file://%s/valid.xml\nkeybox_sha256=deadbeef\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
+fetch now >/dev/null 2>&1
+cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "a sha256 pin mismatch keeps the working keybox" || no "a sha256 pin mismatch keeps the working keybox"
+grep -q 'sha256 mismatch' "$T/data/adb/tricky_store/integrity.log" && ok "the pin mismatch is logged" || no "the pin mismatch is logged"
+
+printf 'garbage' > "$T/data/adb/tricky_store/keybox.xml"
+fetch heal >/dev/null 2>&1
+cmp -s "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.prev.xml" && ok "heal brings back the keybox from keybox.prev.xml" || no "heal brings back the keybox from keybox.prev.xml"
+sh "$mod/bin/keybox-validate.sh" "$T/data/adb/tricky_store/keybox.xml" >/dev/null 2>&1 && ok "the healed keybox validates" || no "the healed keybox validates"
+fetch status >/dev/null 2>&1 && ok "status prints without a configured source" || no "status prints without a configured source"
+
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
+printf '%s' "$out" | grep -q 'validation: valid' && ok "the report shows the validation verdict" || no "the report shows the validation verdict ($out)"
 rm -f "$T/data/adb/tricky_store/keybox.xml"
-out=$(. "$mod/bin/keybox.sh"; keybox_report)
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q 'certificate-hack mode' && ok "missing keybox reports certificate-hack mode" || no "missing keybox reports certificate-hack mode"
-printf '<Key algorithm="ecdsa">\n<Key algorithm="rsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
-out=$(. "$mod/bin/keybox.sh"; keybox_report)
+printf '<Key algorithm="ecdsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
+printf '%s' "$out" | grep -q 'no rsa key' && ok "ecdsa-only keybox is called incomplete" || no "ecdsa-only keybox is called incomplete"
+cp "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.xml"
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q 'complete' && ok "ecdsa+rsa keybox is complete" || no "ecdsa+rsa keybox is complete"
 
 [ "$(sp next5 260918)" = 2026-10-05 ] && ok "next5 260918 -> 2026-10-05" || no "next5 260918 -> 2026-10-05"
