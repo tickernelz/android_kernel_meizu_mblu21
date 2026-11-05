@@ -116,9 +116,12 @@ plain http is refused. When `curl` is absent the busybox `wget` fallback is only
 implemented`; without the pin the fetch is refused with a log line instead of trusting the
 connection.
 
-Scratch space comes from the first writable candidate: `INTEGRITY_SCRATCH`,
-`$TS_DIR`, `TMPDIR`, `/data/local/tmp`, then the directory of the file being validated. Nothing
-depends on `/tmp`, which a boot-time module context does not have.
+Scratch space comes from the first writable candidate: `INTEGRITY_SCRATCH`, then
+`$INTEGRITY_ROOT/data/adb/tricky_store` (that is `/data/adb/tricky_store`, root-owned, when
+`INTEGRITY_ROOT` is unset), then `TMPDIR`, `/data/local/tmp`, and finally the directory of the
+file being validated. Each candidate is probed with a real `mkdir`, and a trap removes the
+scratch tree on exit and on `INT`/`TERM`/`HUP`. Nothing depends on `/tmp`, which a boot-time
+module context does not have.
 
 `heal` runs only when `auto_keybox=1` **and** a source is configured **and** `keybox.xml`
 exists, so the default configuration never rewrites the owner keybox at boot.

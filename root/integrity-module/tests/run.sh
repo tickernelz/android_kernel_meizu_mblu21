@@ -197,8 +197,8 @@ ones=$(grep -c '^last_attempt=' "$T/data/adb/tricky_store/keybox.state" 2>/dev/n
 [ "$first" != "$second" ] && [ "$ones" = 1 ] && ok "the second attempt advances last_attempt" || no "the second attempt advances last_attempt (first=$first second=$second lines=$ones)"
 grep -qxF "last_source=$url_b" "$T/data/adb/tricky_store/keybox.state" && ok "the state file follows the current source" || no "the state file follows the current source"
 
-out=$(env -u TMPDIR INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator works with TMPDIR unset" || no "validator works with TMPDIR unset ($out)"
-out=$(TMPDIR=$FX/does-not-exist INTEGRITY_SCRATCH=$FX/also-missing INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator falls back when the scratch candidates are missing" || no "validator falls back when the scratch candidates are missing ($out)"
+out=$(TMPDIR=$FX/valid.xml INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator ignores a TMPDIR that is a regular file" || no "validator ignores a TMPDIR that is a regular file ($out)"
+out=$(env -u TMPDIR INTEGRITY_SCRATCH=$FX/valid.xml INTEGRITY_ROOT= TMPDIR=$FX/valid.xml sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator falls back to the file directory when /tmp style candidates are unusable" || no "validator falls back to the file directory when /tmp style candidates are unusable ($out)"
 leftovers=$(find "$T" -name '.keybox-validate*' 2>/dev/null | wc -l | tr -d ' ')
 [ "$leftovers" = 0 ] && ok "validator leaves no scratch directory behind" || no "validator leaves no scratch directory behind (found $leftovers)"
 
@@ -226,7 +226,8 @@ if command -v python3 >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; the
     openssl req -x509 -newkey rsa:2048 -nodes -keyout "$T/tls/ca.key" -out "$T/tls/ca.pem" -subj "/CN=ZHA4968 test CA" -days 2 >/dev/null 2>&1
     openssl req -new -newkey rsa:2048 -nodes -keyout "$T/tls/server.key" -out "$T/tls/server.csr" -subj "/CN=127.0.0.1" >/dev/null 2>&1
     openssl x509 -req -in "$T/tls/server.csr" -CA "$T/tls/ca.pem" -CAkey "$T/tls/ca.key" -CAcreateserial -out "$T/tls/server.pem" -days 2 -extfile <(printf 'subjectAltName=IP:127.0.0.1') >/dev/null 2>&1
-    python3 "$here/https-server.py" "$T/tls/server.pem" "$T/tls/server.key" "$T/tls/ports.json" "$FX/valid.xml" &
+    sed 's/DeviceID="sw"/DeviceID="sw-redirect"/' "$FX/valid.xml" > "$FX/valid2.xml"
+    python3 "$here/https-server.py" "$T/tls/server.pem" "$T/tls/server.key" "$T/tls/ports.json" "$FX/valid.xml" "$FX/valid2.xml" &
     tls_pid=$!
     trap 'kill $tls_pid 2>/dev/null' EXIT
     i=0
