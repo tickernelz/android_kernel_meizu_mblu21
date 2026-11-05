@@ -182,6 +182,21 @@ cmp -s "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.prev.xml" && ok "heal br
 sh "$mod/bin/keybox-validate.sh" "$T/data/adb/tricky_store/keybox.xml" >/dev/null 2>&1 && ok "the healed keybox validates" || no "the healed keybox validates"
 fetch status >/dev/null 2>&1 && ok "status prints without a configured source" || no "status prints without a configured source"
 
+fresh
+url_a='file:///tmp/a|b&c\\d/kb-a.xml'
+url_b='file:///tmp/e|f&g\\h/kb-b.xml'
+printf 'auto_keybox=1\nkeybox_url=%s\n' "$url_a" > "$T/data/adb/tricky_store/integrity.conf"
+err_a=$(INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" now 2>&1 >/dev/null)
+first=$(sed -n 's/^last_attempt=//p' "$T/data/adb/tricky_store/keybox.state" | tail -n 1)
+printf 'auto_keybox=1\nkeybox_url=%s\n' "$url_b" > "$T/data/adb/tricky_store/integrity.conf"
+sleep 1
+err_b=$(INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" now 2>&1 >/dev/null)
+second=$(sed -n 's/^last_attempt=//p' "$T/data/adb/tricky_store/keybox.state" | tail -n 1)
+ones=$(grep -c '^last_attempt=' "$T/data/adb/tricky_store/keybox.state" 2>/dev/null)
+[ -z "$err_a" ] && [ -z "$err_b" ] && ok "a source with | & and \\ writes the state without an error" || no "a source with | & and \\ writes the state without an error (a=$err_a b=$err_b)"
+[ "$first" != "$second" ] && [ "$ones" = 1 ] && ok "the second attempt advances last_attempt" || no "the second attempt advances last_attempt (first=$first second=$second lines=$ones)"
+grep -qxF "last_source=$url_b" "$T/data/adb/tricky_store/keybox.state" && ok "the state file follows the current source" || no "the state file follows the current source"
+
 out=$(env -u TMPDIR INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator works with TMPDIR unset" || no "validator works with TMPDIR unset ($out)"
 out=$(TMPDIR=$FX/does-not-exist INTEGRITY_SCRATCH=$FX/also-missing INTEGRITY_ROOT=$T sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>&1) && ok "validator falls back when the scratch candidates are missing" || no "validator falls back when the scratch candidates are missing ($out)"
 leftovers=$(find "$T" -name '.keybox-validate*' 2>/dev/null | wc -l | tr -d ' ')
