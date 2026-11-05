@@ -77,7 +77,10 @@ doctor() {
     rest=${algs#* }
     rsa=${rest##* }
     if [ "$state" = present ] && [ "$rsa" -eq 0 ]; then
-        rc=1
+        printf '[warn] the keybox has no rsa key, so Play falls back to the real TEE record; that is the
+'
+        printf '       expected state when the owner keybox is kept and BASIC is the goal
+'
     fi
 
     printf '== security patch\n'
