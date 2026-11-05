@@ -21,6 +21,14 @@ INTEGRITY_BIN="$MODPATH/bin"
 if [ -f "$INTEGRITY_BIN/keybox.sh" ]; then
     . "$INTEGRITY_BIN/keybox.sh"
     keybox_auto_apply
+    if [ -f "$INTEGRITY_BIN/keybox-fetch.sh" ]; then
+        sh "$INTEGRITY_BIN/keybox-fetch.sh" heal
+    fi
+fi
+
+if [ "$(conf_get auto_keybox)" = 1 ] && [ -f "$INTEGRITY_BIN/keybox-fetch.sh" ]; then
+    bootlog "auto_keybox=1: the scheduled fetch loop is running every 15 minutes"
+    nohup sh "$INTEGRITY_BIN/keybox-fetch.sh" loop >/dev/null 2>&1 &
 fi
 
 sh "$MODPATH/bin/fix-persist.sh" >/dev/null 2>&1

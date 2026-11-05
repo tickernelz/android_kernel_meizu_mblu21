@@ -12,7 +12,9 @@ level and the keybox policy. It replaces the combined third-party drop-in that o
 | `module/customize.sh` | installer: moves the old `/data/adb/modules/tricky_store` aside, keeps the keybox already on the phone, seeds the config |
 | `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then start the Tricky Store daemon from the module root |
 | `module/bin/integrity.sh` | `status`, `doctor`, `verdict`, `keybox`, `targets`, `sp` |
-| `module/bin/keybox.sh` | keybox completeness report and the opt-in fetch |
+| `module/bin/keybox.sh` | keybox completeness report and the install-mode switch |
+| `module/bin/keybox-fetch.sh` | scheduled fetch, validation gate, backup, rollback, one log line per attempt |
+| `module/bin/keybox-validate.sh` | keybox validator: XML shape, ecdsa+rsa, certificate chain linkage on the DER names |
 | `module/bin/boot-verdict.sh`, `module/bin/verdict-parse.sh` | measure the verdict 60 s after every boot and append one parsed line to `/data/adb/tricky_store/verdicts.jsonl`; it taps only when the checker has focus and records `skipped:<focus>` otherwise |
 | `module/bin/fix-persist.sh` | restore `/data/property/persistent_properties` to 0600 and re-arm `persist.sys.usb.config=adb` |
 | `module/bin/targets.sh`, `module/bin/sp.sh` | target list and security patch level helpers |
@@ -31,6 +33,19 @@ The Tricky Store payload keeps its upstream layout at the module root — `servi
 `app_process` with `-Djava.class.path=./service.apk`, so its working directory has to be the
 directory that holds the APK and the shared library. Only `post-fs-data.sh`, `service.sh`
 and `target.txt` collide with the PIF payload, and those are merged here.
+
+## Provenance
+
+Two layers, one zip.
+
+| Layer | Origin | Contents |
+|---|---|---|
+| base module | ZHA-4962, `main` `5c3e9e4` (Raka) | TrickyStore + Play Integrity Fork payload, target list, security-patch alignment, `fix-persist.sh`, `su_compat` off, SUSFS wiring, per-boot verdict recording |
+| keybox fetch | ZHA-4968 (Yanto) | `bin/keybox-fetch.sh`, `bin/keybox-validate.sh`, `bin/keybox-cert-names.awk`, `bin/keybox-split.awk`, and the `keybox_url`/`keybox_file`/`keybox_fetch_interval_h` keys they read |
+
+The RE evidence for why the fetch layer exists at all — and why a complete keybox is the only
+remaining path to `MEETS_DEVICE_INTEGRITY` on this phone — is the `re-attestation` document on
+ZHA-4968. Neither layer ships a keybox.
 
 ## Build
 
@@ -63,21 +78,52 @@ every other artifact of the old module into `/data/adb/tricky_store/legacy-<stam
 |---|---|
 | `auto` (default) | keep the keybox already on the phone; install the bundled one only when none exists |
 | `existing` | never install the bundled one, whatever is there stays |
-| `software` | install the bundled one, but only when the content actually differs |
-| `software` | install the software keybox that ships inside the Tricky Store release, backing up the previous file next to it |
+| `software` | install the software keybox that ships inside the Tricky Store release, but only when the content actually differs, backing up the previous file next to it |
 
 The bundled software keybox is `software-keybox.xml` in the module and inside the official
 Tricky Store zip (`DeviceID="sw"`); it carries both an `ecdsa` and an `rsa` key, which is
 what Play asks for. It is a self-signed test chain, not a Google-signed one.
 
-The module never downloads a keybox by default: `auto_keybox=0` and `keybox_url` is
-empty. Turning it on is an explicit decision, and `service.sh` warns every time it runs:
+The module never downloads a keybox by default: `auto_keybox=0` and no source is
+configured. Turning it on is an explicit decision. `bin/keybox-fetch.sh` is the engine:
 
-* an `http://` source is plain HTTP, so anything on the path can substitute the file;
-* `keybox_sha256` is a change detector, not a signature, so leaving it empty trusts
-  whatever arrives;
-* a keybox carries another device's private attestation keys, which is why no keybox is
-  vendored here and why the shipped config does not name a source.
+| setting | meaning |
+|---|---|
+| `auto_keybox` | `1` runs the scheduled fetch; `0` keeps the engine silent |
+| `keybox_url` | `https://` or `file://` source; plain `http://` and every other scheme are refused with a log line |
+| `keybox_file` | local path used when `keybox_url` is empty |
+| `keybox_fetch_interval_h` | minimum hours between attempts, default `24`; `service.sh` ticks every 15 minutes and skips anything not due |
+| `keybox_sha256` | optional pin; a mismatch rejects the download |
+
+A download is data only: the engine never executes what it fetches, and it validates
+before it installs (`bin/keybox-validate.sh`):
+
+* the root element is `AndroidAttestation`, the file is between 512 B and 64 KiB, and it
+  carries no `DOCTYPE`, `ENTITY` or `script`;
+* at least one `ecdsa` key and one `rsa` key, which is what Play asks for;
+* every key has a private key and a certificate chain of at least two certificates whose
+  declared `NumberOfCertificates` matches the file;
+* each certificate's issuer matches the next certificate's subject, and the last
+  certificate is self-signed, checked on the DER of both names.
+
+The last rule is the one that catches a half-served or spliced file. A rejected download
+never touches the keybox in use: the engine keeps `keybox.xml`, and when that file is
+itself unusable it restores `keybox.prev.xml` (`bin/keybox-fetch.sh heal`).
+
+Every attempt writes exactly one log line with the result and the reason; the replaced
+file becomes `keybox.prev.xml`, and `keybox.source` records the source, the timestamp and
+the sha256. Neither the log nor the stamp ever contains key material:
+
+    keybox fetch rejected: invalid no-rsa
+    keybox installed from file:///data/local/tmp/kb.xml sha256=… valid size=5843 keys=2 certs=4 ec=1 rsa=1
+    keybox fetch refused: http://example.invalid/kb.xml is plain http; https:// or file:// is required
+
+`bin/keybox-fetch.sh status` prints the schedule state, the installed source stamp and the
+validation verdict of both `keybox.xml` and `keybox.prev.xml`.
+
+A keybox carries another device's private attestation keys, which is why no keybox is
+vendored here, why the shipped config names no source, and why the tests build their own
+self-signed chains instead of using one.
 
 `bin/integrity.sh keybox` reports whether the file on the phone is complete: Play asks
 for both an `ecdsa` and an `rsa` key, and an `ecdsa`-only file makes Play log
