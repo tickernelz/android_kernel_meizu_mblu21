@@ -130,7 +130,11 @@ printf 'keybox_mode=auto
 auto_verdict=0
 ' > "$T/data/adb/tricky_store/integrity.conf"
 rm -f "$T/data/adb/tricky_store/verdicts.jsonl"
-INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
+printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"
+for stub in sleep am input wm logcat; do printf '#!/bin/sh\nexit 0\n' > "$T/bin/$stub"; done
+printf '#!/bin/sh\necho "  mCurrentFocus=Window{abc u0 com.henrikherzig.playintegritychecker/x}"\n' > "$T/bin/dumpsys"
+chmod +x "$T/bin/"*
+INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
 [ -f "$T/data/adb/tricky_store/verdicts.jsonl" ] && no "auto_verdict=0 records nothing" || ok "auto_verdict=0 records nothing"
 
 
@@ -168,14 +172,18 @@ grep -q 'ts_daemon=0: the TrickyStore loop is not started' "$T/data/adb/tricky_s
 
 fresh
 cp -a "$mod" "$T/mod"
-printf '#!/bin/sh\nexit 0\n' > "$T/mod/daemon"
+printf '#!/bin/sh\necho run >> "%s/daemon.count"\n' "$T" > "$T/mod/daemon"
 chmod 755 "$T/mod/daemon"
 printf 'keybox_mode=auto\nts_daemon=1\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
 chmod +x "$T/bin/sleep"
 INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$T/mod/service.sh" >/dev/null 2>&1
 sleep 2
-grep -q 'stopped after five short-lived runs' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "the daemon loop gives up after five short-lived runs" || no "the daemon loop gives up after five short-lived runs"
+c1=$(wc -l < "$T/daemon.count" 2>/dev/null | tr -d ' ')
+command sleep 2
+c2=$(wc -l < "$T/daemon.count" 2>/dev/null | tr -d ' ')
+[ "$c1" = 5 ] && [ "$c2" = 5 ] && ok "the daemon loop runs exactly five short-lived times, then stops" || no "the daemon loop runs exactly five short-lived times, then stops (got $c1 then $c2)"
+pkill -f "$T/mod/service.sh" 2>/dev/null || true
 
 fresh
 printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"
