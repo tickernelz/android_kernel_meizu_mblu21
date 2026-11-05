@@ -108,6 +108,12 @@ person to press a button; `bin/integrity.sh verdicts 5` prints the tail.
 here: SUSFS active, no `/system/bin/su` in the default namespace, `persistent_properties` at
 `0600`, and `persist.sys.usb.config` still carrying `adb`.
 
+`su_compat` was on (`ksud feature list` → `[ENABLED] su_compat (ID=0)`), which is why a 6.1 MB
+`/system/bin/su` existed; `ksud feature set su_compat 0` removes it, and root over adb then goes
+through adbd itself (`adb shell id` → `uid=0(root) ... context=u:r:ksu:s0`). With `su_compat` off,
+`adb shell su -c ...` no longer exists, so every command in this document is meant to be run as
+`adb shell <command>` on a root adbd.
+
 ## How the verdict was read
 
 ```sh
