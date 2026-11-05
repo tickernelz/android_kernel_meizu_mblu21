@@ -13,7 +13,7 @@ level and the keybox policy. It replaces the combined third-party drop-in that o
 | `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then start the Tricky Store daemon from the module root |
 | `module/bin/integrity.sh` | `status`, `doctor`, `verdict`, `keybox`, `targets`, `sp` |
 | `module/bin/keybox.sh` | keybox completeness report and the opt-in fetch |
-| `module/bin/boot-verdict.sh`, `module/bin/verdict-parse.sh` | measure the verdict 60 s after every boot and append one parsed line to `/data/adb/tricky_store/verdicts.jsonl` |
+| `module/bin/boot-verdict.sh`, `module/bin/verdict-parse.sh` | measure the verdict 60 s after every boot and append one parsed line to `/data/adb/tricky_store/verdicts.jsonl`; it taps only when the checker has focus and records `skipped:<focus>` otherwise |
 | `module/bin/fix-persist.sh` | restore `/data/property/persistent_properties` to 0600 and re-arm `persist.sys.usb.config=adb` |
 | `module/bin/targets.sh`, `module/bin/sp.sh` | target list and security patch level helpers |
 | `module/target.txt`, `module/security_patch.txt`, `module/pif.prop`, `module/integrity.conf` | the defaults the installer seeds |
@@ -46,9 +46,9 @@ carry a fixed timestamp, so the same inputs give the same sha256.
 
 ```sh
 adb push mblu21-integrity.zip /data/local/tmp/
-adb shell su -c 'ksud module install /data/local/tmp/mblu21-integrity.zip'
+adb shell ksud module install /data/local/tmp/mblu21-integrity.zip
 adb reboot
-adb shell su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh doctor'
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh doctor
 ```
 
 `customize.sh` keeps an existing `/data/adb/tricky_store/keybox.xml` untouched and moves
@@ -63,6 +63,7 @@ every other artifact of the old module into `/data/adb/tricky_store/legacy-<stam
 |---|---|
 | `auto` (default) | keep the keybox already on the phone; install the bundled one only when none exists |
 | `existing` | never install the bundled one, whatever is there stays |
+| `software` | install the bundled one, but only when the content actually differs |
 | `software` | install the software keybox that ships inside the Tricky Store release, backing up the previous file next to it |
 
 The bundled software keybox is `software-keybox.xml` in the module and inside the official
@@ -93,8 +94,8 @@ patch level therefore has to match the spoofed fingerprint's build id, and
 must agree, and the level must sit on the 5th.
 
 ```sh
-su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh sp show'
-su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh sp set 2026-11-05'
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh sp show
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh sp set 2026-11-05
 ```
 
 ## Measure
@@ -105,8 +106,8 @@ parsed result to `/data/adb/tricky_store/verdicts.jsonl`. `auto_verdict=0` in
 `/data/adb/tricky_store/integrity.conf` turns that off.
 
 ```sh
-su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdicts 5'
-su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh doctor'
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdicts 5
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh doctor
 ```
 
 `doctor` also checks the hiding invariants: SUSFS active, no `/system/bin/su` in the default

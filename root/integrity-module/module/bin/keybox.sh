@@ -118,6 +118,10 @@ keybox_apply_mode() {
         return 0
     fi
     mkdir -p "$TS_DIR" 2>/dev/null
+    if [ -f "$KEYBOX" ] && cmp -s "$src" "$KEYBOX"; then
+        log_line 'the bundled software keybox is already in place'
+        return 0
+    fi
     if [ -f "$KEYBOX" ]; then
         cp -f "$KEYBOX" "$KEYBOX.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null
         log_line "backed up the keybox that was in use"

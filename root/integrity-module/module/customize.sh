@@ -49,4 +49,4 @@ chmod 644 "$MODPATH/pif.prop" "$MODPATH/tricky/service.apk" "$MODPATH/classes.de
 for f in integrity.conf target.txt security_patch.txt; do
     set_perm "$TS_DIR/$f" 0 0 644
 done
-ui_print "- done; reboot, then: su -c sh $MODPATH/bin/integrity.sh doctor"
+ui_print "- done; reboot, then: adb shell sh $MODPATH/bin/integrity.sh doctor"

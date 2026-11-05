@@ -133,6 +133,72 @@ rm -f "$T/data/adb/tricky_store/verdicts.jsonl"
 INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
 [ -f "$T/data/adb/tricky_store/verdicts.jsonl" ] && no "auto_verdict=0 records nothing" || ok "auto_verdict=0 records nothing"
 
+
+fresh
+printf 'keybox_mode=software\nauto_keybox=0\nts_daemon=0\nauto_verdict=1\nkeep_adb=1\nverdict_delay=0\n' > "$T/data/adb/tricky_store/integrity.conf"
+printf '<Key algorithm="ecdsa">\n<Key algorithm="rsa">\n' > "$T/data/adb/modules/playintegrityfix/software-keybox.xml"
+printf '<Key algorithm="ecdsa">\n<Key algorithm="rsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
+n1=$( (ls "$T/data/adb/tricky_store"/keybox.xml.bak.* 2>/dev/null || true) | wc -l | tr -d ' ')
+INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T sh -c '. "$INTEGRITY_BIN/keybox.sh"; keybox_apply_mode' >/dev/null 2>&1
+n2=$( (ls "$T/data/adb/tricky_store"/keybox.xml.bak.* 2>/dev/null || true) | wc -l | tr -d ' ')
+[ "$n1" = "$n2" ] && ok "an identical software keybox makes no new backup" || no "an identical software keybox makes no new backup ($n1 -> $n2)"
+
+fresh
+printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"
+printf '#!/bin/sh\necho "setprop $*" >> "%s/setprop.trace"\n' "$T" > "$T/bin/setprop"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/resetprop"
+chmod +x "$T/bin/"*
+printf 'keep_adb=0\n' > "$T/data/adb/tricky_store/integrity.conf"
+mkdir -p "$T/data/property"
+printf 'x' > "$T/data/property/persistent_properties"
+chmod 0666 "$T/data/property/persistent_properties"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/fix-persist.sh" >/dev/null 2>&1
+grep -q 'usb.config' "$T/setprop.trace" 2>/dev/null && no "keep_adb=0 leaves usb debugging alone" || ok "keep_adb=0 leaves usb debugging alone"
+[ "$(stat -c %a "$T/data/property/persistent_properties")" = 600 ] && ok "fix-persist still repairs the mode with keep_adb=0" || no "fix-persist still repairs the mode with keep_adb=0"
+printf 'keep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
+chmod 0666 "$T/data/property/persistent_properties"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/fix-persist.sh" >/dev/null 2>&1
+grep -q 'setprop persist.sys.usb.config adb' "$T/setprop.trace" 2>/dev/null && ok "keep_adb=1 re-arms adb" || no "keep_adb=1 re-arms adb"
+
+fresh
+printf 'keybox_mode=auto\nts_daemon=0\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/service.sh" >/dev/null 2>&1
+grep -q 'ts_daemon=0: the TrickyStore loop is not started' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "service.sh does not start the daemon loop by default" || no "service.sh does not start the daemon loop by default"
+
+fresh
+cp -a "$mod" "$T/mod"
+printf '#!/bin/sh\nexit 0\n' > "$T/mod/daemon"
+chmod 755 "$T/mod/daemon"
+printf 'keybox_mode=auto\nts_daemon=1\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
+chmod +x "$T/bin/sleep"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$T/mod/service.sh" >/dev/null 2>&1
+sleep 2
+grep -q 'stopped after five short-lived runs' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "the daemon loop gives up after five short-lived runs" || no "the daemon loop gives up after five short-lived runs"
+
+fresh
+printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/am"
+printf '#!/bin/sh\necho "input $*" >> "%s/input.trace"\n' "$T" > "$T/bin/input"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/wm"
+printf '#!/bin/sh\necho "  mCurrentFocus=Window{abc u0 NotificationShade}"\n' > "$T/bin/dumpsys"
+printf '#!/bin/sh\ncat "%s/fixture.log" 2>/dev/null\n' "$T" > "$T/bin/logcat"
+chmod +x "$T/bin/"*
+printf 'keybox_mode=auto\nauto_verdict=1\nverdict_delay=0\n' > "$T/data/adb/tricky_store/integrity.conf"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
+grep -q 'skipped:NotificationShade' "$T/data/adb/tricky_store/verdicts.jsonl" 2>/dev/null && ok "boot-verdict records a skip when another window has focus" || no "boot-verdict records a skip when another window has focus"
+grep -q 'input tap' "$T/input.trace" 2>/dev/null && no "boot-verdict does not tap without focus" || ok "boot-verdict does not tap without focus"
+
+printf '#!/bin/sh\necho "  mCurrentFocus=Window{abc u0 com.henrikherzig.playintegritychecker/com.henrikherzig.playintegritychecker.MainActivity}"\n' > "$T/bin/dumpsys"
+chmod +x "$T/bin/dumpsys"
+: > "$T/input.trace"
+printf 'I/System.out( 1): {\nI/System.out( 1):   "appIntegrity": { "appRecognitionVerdict": "PLAY_RECOGNIZED" },\nI/System.out( 1):   "deviceIntegrity": { "deviceRecognitionVerdict": ["MEETS_BASIC_INTEGRITY"] },\nI/System.out( 1):   "accountDetails": { "appLicensingVerdict": "LICENSED" } }\n' > "$T/fixture.log"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&1
+grep -q 'input tap 360 594' "$T/input.trace" 2>/dev/null && ok "boot-verdict taps once the checker has focus" || no "boot-verdict taps once the checker has focus"
+grep -q '"device":"MEETS_BASIC_INTEGRITY"' "$T/data/adb/tricky_store/verdicts.jsonl" 2>/dev/null && ok "boot-verdict records the parsed verdict when focused" || no "boot-verdict records the parsed verdict when focused"
+
 printf '
 %s passed, %s failed
 ' "$pass" "$fail"

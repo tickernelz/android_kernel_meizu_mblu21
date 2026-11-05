@@ -5,4 +5,4 @@ args=()
 if [ -n "${ADB_SERIAL:-}" ]; then
     args=(-s "$ADB_SERIAL")
 fi
-"$adb_bin" "${args[@]}" shell su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdict'
+"$adb_bin" "${args[@]}" shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdict

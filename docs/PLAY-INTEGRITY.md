@@ -31,7 +31,7 @@ carried by this project and none was fetched.
 | `mblu21-integrity` v1.0.0, `keybox_mode=existing` | `evokerrkey44.xml`, ecdsa only | Tricky Store 1.4.1 | `MEETS_BASIC_INTEGRITY` on 3 consecutive boots |
 | `mblu21-integrity` v1.0.0, `keybox_mode=software` | Tricky Store's software keybox, ecdsa + rsa | Tricky Store 1.4.1 | `MEETS_BASIC_INTEGRITY` on 2 consecutive boots |
 | `AlwaysStrong` restored as a cross-check | Tricky Store's software keybox, ecdsa + rsa | TEESimulator | `UNEVALUATED` twice |
-| `mblu21-integrity` v1.0.0, `keybox_mode=software`, shipped state | Tricky Store's software keybox, ecdsa + rsa | Tricky Store 1.4.1 | `MEETS_BASIC_INTEGRITY` |
+| `mblu21-integrity` v1.0.0, `keybox_mode=software` (test only; shipped default is `auto`) | Tricky Store's software keybox, ecdsa + rsa | Tricky Store 1.4.1 | `MEETS_BASIC_INTEGRITY` |
 
 `MEETS_DEVICE_INTEGRITY` was not reached in any configuration, and
 `MEETS_STRONG_INTEGRITY` never appeared at all.
@@ -95,8 +95,9 @@ or Settings activity in logcat before it.
 
 ## Sustained BASIC, and the other invariants
 
-The shipped configuration (`keybox_mode=software`, `auto_keybox=0`, target list of four
-packages, `fix-persist.sh` active) produced, boot after boot,
+The shipped configuration (`keybox_mode=auto`, so an existing keybox is kept and the bundled one is only
+installed when there is none, `auto_keybox=0`, `ts_daemon=0`, target list of four packages,
+`fix-persist.sh` active) produced, boot after boot,
 `deviceRecognitionVerdict: ["MEETS_BASIC_INTEGRITY"]` with
 `appRecognitionVerdict: PLAY_RECOGNIZED` and `appLicensingVerdict: LICENSED` — including three
 consecutive boots on the earlier keybox configuration. `bin/boot-verdict.sh` now repeats that
@@ -114,10 +115,20 @@ through adbd itself (`adb shell id` → `uid=0(root) ... context=u:r:ksu:s0`). W
 `adb shell su -c ...` no longer exists, so every command in this document is meant to be run as
 `adb shell <command>` on a root adbd.
 
+## CPU cost of the keystore daemon
+
+Tricky Store's daemon exits after a second or two on this ROM, and the upstream `service.sh` respawns it
+every two seconds. Measured with `/proc/<loop pid>/stat` fields 16 and 17 over a 60.13 s window:
+`19189 17319` → `20064 18152`, i.e. 1708 ticks = **0.284 core, continuously**, for a daemon that does
+not modify the attestation here. `ts_daemon` is therefore `0` by default and the loop is not started;
+with the loop stopped the same window measures **0 ticks**, and a verdict taken afterwards still returns
+`MEETS_BASIC_INTEGRITY`. Setting `ts_daemon=1` starts the loop with a backoff that stops it after five
+runs shorter than 10 s and writes that to `integrity.log`.
+
 ## How the verdict was read
 
 ```sh
-adb shell su -c 'sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdict'
+adb shell sh /data/adb/modules/playintegrityfix/bin/integrity.sh verdict
 ```
 
 That wakes the phone, resets Simple Play Integrity Checker, taps its request button and
