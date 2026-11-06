@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mblu21 integrity</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; line-height: 1.45; }
+h1 { font-size: 1.05rem; margin: 0 0 12px; }
+section { border: 1px solid rgba(128,128,128,.35); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+td { padding: 3px 0; vertical-align: top; }
+td:first-child { opacity: .65; width: 45%; }
+button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(128,128,128,.5); background: transparent; }
+.ok { color: #1a7f37; } .bad { color: #cf222e; }
+#msg { font-size: .85rem; opacity: .75; margin-top: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>mblu21 integrity</h1>
+<section>
+  <h2>Penyaji atestasi</h2>
+  <table><tbody id="provider"></tbody></table>
+</section>
+<section>
+  <h2>Keybox aktif</h2>
+  <table><tbody id="keybox"></tbody></table>
+</section>
+<section>
+  <h2>Play Integrity terakhir</h2>
+  <table><tbody id="verdict"></tbody></table>
+</section>
+<section>
+  <button id="refresh">Segarkan keybox</button>
+  <button id="check">Periksa verdict</button>
+  <div id="msg"></div>
+</section>
+<script src="app.js"></script>
+</body>
+</html>

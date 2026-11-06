@@ -12,8 +12,8 @@ status() {
     printf 'pif companion: %s\n' "$([ -f "$MOD_DIR/zygisk/arm64-v8a.so" ] && echo present || echo missing)"
     printf 'targets: %s entries\n' "$(grep -cv '^#' "$TARGETS_FILE" 2>/dev/null | tr -d ' ')"
     printf 'security patch: %s\n' "$(file_get "$PIF_PROP" SECURITY_PATCH)"
-    printf 'keybox_mode: %s, ts_daemon: %s, auto_verdict: %s, keep_adb: %s\n' \
-        "$(conf_get keybox_mode)" "$(conf_get ts_daemon)" "$(conf_get auto_verdict)" "$(conf_get keep_adb)"
+    printf 'keybox_mode: %s, auto_keybox: %s, auto_verdict: %s, keep_adb: %s\n' \
+        "$(conf_get keybox_mode)" "$(conf_get auto_keybox)" "$(conf_get auto_verdict)" "$(conf_get keep_adb)"
     keybox_report
     printf 'last verdict in logcat: %s\n' "$(logcat -d -v brief 2>/dev/null | grep -o 'MEETS_[A-Z_]*' | tail -n 1)"
 }
@@ -35,31 +35,47 @@ doctor() {
         printf '[fail] the module is disabled\n'
         rc=1
     fi
-    for f in classes.dex zygisk/arm64-v8a.so service.apk libtricky_store.so machikado daemon pif.prop; do
+    for f in classes.dex zygisk/arm64-v8a.so pif.prop teesim/daemon teesim/classes.dex teesim/arm64-v8a/libteesim_keymint.so teesim/arm64-v8a/inject; do
         if [ ! -e "$MOD_DIR/$f" ]; then
             printf '[fail] missing %s\n' "$f"
             rc=1
         fi
     done
 
-    printf '== keystore daemon\n'
-    ts_wanted=$(conf_get ts_daemon)
-    if [ "$ts_wanted" != 1 ]; then
-        printf '[ok] the TrickyStore loop is off (ts_daemon=%s); the daemon cannot help while it does not inject\n' "${ts_wanted:-0}"
+    printf '== attestation provider\n'
+    if [ -f "$MOD_DIR/teesim/daemon" ]; then
+        printf '[ok] the TEESim payload is bundled at %s/teesim\n' "$MOD_DIR"
     else
-        first=$(launch_count)
-        sleep 10
-        second=$(launch_count)
-        rate=$((second - first))
-        if [ "$rate" -gt 3 ]; then
-            printf '[fail] the daemon respawned %s times in 10 s, which burns CPU without injecting\n' "$rate"
-            rc=1
-        elif pgrep -f "$MOD_DIR/service.sh" >/dev/null 2>&1; then
-            printf '[ok] the loop is alive and respawned %s times in 10 s\n' "$rate"
+        printf '[fail] the TEESim payload is missing under %s/teesim\n' "$MOD_DIR"
+        rc=1
+    fi
+    ts_pid=$(pidof teesim 2>/dev/null | awk '{print $1}')
+    if [ -n "$ts_pid" ]; then
+        printf '[ok] teesim control daemon alive pid=%s\n' "$ts_pid"
+    else
+        printf '[fail] no teesim process: key attestation is not redirected\n'
+        rc=1
+    fi
+    ks_pid=$(pidof keystore2 2>/dev/null | awk '{print $1}')
+    if [ -n "$ks_pid" ]; then
+        ks_maps=$(grep -c libteesim "/proc/$ks_pid/maps" 2>/dev/null | tr -d ' ')
+        if [ "${ks_maps:-0}" -ge 1 ]; then
+            printf '[ok] libteesim mapped %s time(s) inside keystore2 pid=%s\n' "$ks_maps" "$ks_pid"
         else
-            printf '[fail] ts_daemon=1 but the loop is not running\n'
+            printf '[fail] libteesim is not mapped inside keystore2, so nothing intercepts attestation\n'
             rc=1
         fi
+    else
+        printf '[fail] keystore2 is not running\n'
+        rc=1
+    fi
+    if [ -f "$TEESIM_CONF" ]; then
+        apps=$(sed -n '/"apps"/,/]/p' "$TEESIM_CONF" 2>/dev/null | grep -c '"')
+        apps=$((apps - 1))
+        printf '[info] teesim config: %s, profile apps: %s\n' "$TEESIM_CONF" "$apps"
+    else
+        printf '[fail] %s is missing; the interceptor has no profile\n' "$TEESIM_CONF"
+        rc=1
     fi
 
     printf '== zygisk\n'
@@ -77,10 +93,8 @@ doctor() {
     rest=${algs#* }
     rsa=${rest##* }
     if [ "$state" = present ] && [ "$rsa" -eq 0 ]; then
-        printf '[warn] the keybox has no rsa key, so Play falls back to the real TEE record; that is the
-'
-        printf '       expected state when the owner keybox is kept and BASIC is the goal
-'
+        printf '[fail] keybox is incomplete: no rsa, so the provider cannot serve the rsa attestation record\n'
+        rc=1
     fi
 
     printf '== security patch\n'
@@ -92,8 +106,16 @@ doctor() {
     fi
 
     printf '== target list\n'
+    for pkg in com.google.android.gms com.android.vending; do
+        if grep -qxF "$pkg" "$TARGETS_FILE" 2>/dev/null; then
+            printf '[ok] %s is in %s\n' "$pkg" "$TARGETS_FILE"
+        else
+            printf '[fail] %s is missing from %s\n' "$pkg" "$TARGETS_FILE"
+            rc=1
+        fi
+    done
     if tg_out=$(sh "$INTEGRITY_BIN/targets.sh" check 2>&1); then
-        printf '[ok] Play Services, Play Store and the checker are in scope\n'
+        printf '[ok] the required packages are in scope\n'
     else
         printf '%s\n' "$tg_out"
         rc=1
@@ -145,7 +167,9 @@ doctor() {
     last=$(logcat -d -v brief 2>/dev/null | grep -o 'MEETS_[A-Z_]*' | tail -n 1)
     printf '[info] last device verdict in logcat: %s\n' "${last:-none}"
     if [ -f "$TS_DIR/verdicts.jsonl" ]; then
-        printf '[info] last recorded boot: %s\n' "$(tail -n 1 "$TS_DIR/verdicts.jsonl")"
+        printf '[info] last raw verdict: %s\n' "$(tail -n 1 "$TS_DIR/verdicts.jsonl")"
+    else
+        printf '[info] no verdict recorded yet\n'
     fi
     return $rc
 }

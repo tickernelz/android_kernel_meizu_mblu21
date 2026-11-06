@@ -4,11 +4,46 @@ bin_dir=$(dirname -- "$0")
 . "$INTEGRITY_BIN/lib.sh"
 
 targets_default() {
-    printf '%s\n' com.android.vending com.google.android.gms com.google.android.gsf "$CHECKER_PKG"
+    printf '%s\n' com.android.vending com.google.android.gms com.google.android.gms.unstable com.google.android.gsf "$CHECKER_PKG"
 }
 
 targets_required() {
-    printf '%s\n' com.android.vending com.google.android.gms
+    printf '%s\n' com.android.vending com.google.android.gms com.google.android.gms.unstable
+}
+
+targets_apps_block() {
+    first=1
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        pkg=$(printf '%s' "$line" | tr -d '\r' | sed 's/[!?]$//')
+        [ -z "$pkg" ] && continue
+        if [ "$first" = 1 ]; then
+            printf '        "%s"' "$pkg"
+            first=0
+        else
+            printf ',\n        "%s"' "$pkg"
+        fi
+    done < "$1"
+    printf '\n'
+}
+
+targets_teesim_sync() {
+    cfg=$TEESIM_CONF
+    [ -f "$cfg" ] || return 0
+    [ -f "$TARGETS_FILE" ] || return 0
+    start=$(grep -n '"apps"' "$cfg" 2>/dev/null | head -n 1 | cut -d: -f1)
+    [ -n "$start" ] || return 1
+    end=$(tail -n +"$start" "$cfg" | grep -n '^[[:space:]]*\]' | head -n 1 | cut -d: -f1)
+    [ -n "$end" ] || return 1
+    end=$((start + end - 1))
+    tmp=$cfg.apps.$$
+    {
+        head -n "$start" "$cfg"
+        targets_apps_block "$TARGETS_FILE"
+        tail -n +"$end" "$cfg"
+    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    mv "$tmp" "$cfg"
+    printf 'teesim apps synced from %s (%s entries)\n' "$TARGETS_FILE" "$(grep -cv '^#' "$TARGETS_FILE" | tr -d ' ')"
 }
 
 targets_reset() {
@@ -63,9 +98,10 @@ targets_check() {
 
 case ${1:-list} in
     reset) targets_reset ;;
-    merge) targets_merge ;;
-    add) shift; targets_add "$@" ;;
-    rm) shift; targets_rm "$@" ;;
+    merge) targets_merge; targets_teesim_sync ;;
+    add) shift; targets_add "$@"; targets_teesim_sync ;;
+    rm) shift; targets_rm "$@"; targets_teesim_sync ;;
+    teesim) targets_teesim_sync ;;
     list) [ -f "$TARGETS_FILE" ] && cat "$TARGETS_FILE" ;;
     check) targets_check ;;
     *)

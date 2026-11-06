@@ -10,6 +10,10 @@ SP_FILE=$TS_DIR/security_patch.txt
 PIF_PROP=$MOD_DIR/pif.prop
 LOG_FILE=$TS_DIR/integrity.log
 CHECKER_PKG=com.henrikherzig.playintegritychecker
+TEESIM_DIR=$INTEGRITY_ROOT/data/adb/teesim
+TEESIM_CONF=$TEESIM_DIR/config.json
+TEESIM_KEYBOX=$TEESIM_DIR/keybox.xml
+TEESIM_MODULE=$INTEGRITY_ROOT/data/adb/modules/teesim
 
 conf_get() {
     [ -f "$CONF" ] || return 0

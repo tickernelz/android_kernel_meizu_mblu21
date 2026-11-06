@@ -28,10 +28,49 @@ state_set() {
 interval_hours() {
     h=$(conf_get keybox_fetch_interval_h)
     case $h in
-        ''|*[!0-9]*) h=24 ;;
+        ''|*[!0-9]*) h=6 ;;
     esac
-    [ "$h" -ge 1 ] || h=24
+    [ "$h" -ge 1 ] || h=6
+    [ "$h" -le 168 ] || h=168
     printf '%s' "$h"
+}
+
+requests_per_day() {
+    h=$(interval_hours)
+    n=$((24 / h))
+    [ "$n" -ge 1 ] || n=1
+    printf '%s' "$n"
+}
+
+seconds_until_due() {
+    last=$(state_get last_attempt)
+    case $last in
+        ''|*[!0-9]*) printf '0'; return 0 ;;
+    esac
+    want=$(( $(interval_hours) * 3600 ))
+    now=$(date +%s)
+    left=$(( last + want - now ))
+    [ "$left" -gt 0 ] || left=0
+    printf '%s' "$left"
+}
+
+catalog_pick() {
+    cat_url=$(conf_get keybox_catalog)
+    [ -n "$cat_url" ] || return 1
+    cache=$TS_DIR/.catalog.json
+    curl -fsSL --max-time 30 -o "$cache.part" "$cat_url" 2>/dev/null || { rm -f "$cache.part"; return 1; }
+    mv "$cache.part" "$cache"
+    entry=$(tr -d '\r\n' < "$cache" | sed 's/},{/}\n{/g' | grep '"revoked":false' | grep '"softbanned":false' | head -n 1)
+    if [ -z "$entry" ]; then
+        entry=$(tr -d '\r\n' < "$cache" | sed 's/},{/}\n{/g' | grep '"revoked":false' | head -n 1)
+    fi
+    [ -n "$entry" ] || return 1
+    cat_source=$(printf '%s' "$entry" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
+    cat_version=$(printf '%s' "$entry" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+    [ -n "$cat_source" ] && [ -n "$cat_version" ] || return 1
+    base=${cat_url%/catalog}
+    enc=$(printf '%s' "$cat_source" | sed 's/@/%40/g; s/ /%20/g')
+    printf '%s/key/%s/%s' "$base" "$enc" "$cat_version"
 }
 
 source_value() {
@@ -41,7 +80,11 @@ source_value() {
         return 0
     fi
     f=$(conf_get keybox_file)
-    [ -n "$f" ] && printf '%s' "$f"
+    if [ -n "$f" ]; then
+        printf '%s' "$f"
+        return 0
+    fi
+    catalog_pick
 }
 
 is_due() {
@@ -70,6 +113,25 @@ fetch_to() {
             p=${src#file://}
             [ -f "$p" ] || return 1
             cp -f "$p" "$dest"
+            ;;
+        */key/*)
+            if command -v curl >/dev/null 2>&1; then
+                curl -fsSL --max-time 40 --proto '=https' --proto-redir '=https' -o "$dest.raw" "$src" || return 1
+                if grep -q '<AndroidAttestation' "$dest.raw" 2>/dev/null; then
+                    mv "$dest.raw" "$dest"
+                else
+                    shuf='1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe'
+                    std='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+                    if ! base64 -d < "$dest.raw" > "$dest" 2>/dev/null || ! grep -q '<' "$dest" 2>/dev/null; then
+                        tr "$shuf" "$std" < "$dest.raw" > "$dest.b64"
+                        base64 -d < "$dest.b64" > "$dest" 2>/dev/null
+                    fi
+                    rm -f "$dest.raw" "$dest.b64"
+                    grep -q '<AndroidAttestation' "$dest" 2>/dev/null || return 1
+                fi
+            else
+                return 4
+            fi
             ;;
         /*)
             [ -f "$src" ] || return 1
@@ -180,6 +242,12 @@ attempt() {
         self_heal
         return 0
     fi
+    if [ "$(conf_get keybox_require_trusted)" = 1 ] && ! printf '%s' "$out" | grep -q 'chain=google'; then
+        rm -f "$tmp"
+        state_set last_result refused-untrusted-chain
+        log_line "keybox fetch refused: $out (no Google or OEM root, so Play would not raise DEVICE)"
+        return 0
+    fi
     cur=$(sha256sum "$KEYBOX" 2>/dev/null | cut -d' ' -f1)
     if [ -n "$cur" ] && [ "$cur" = "$got" ]; then
         rm -f "$tmp"
@@ -192,8 +260,17 @@ attempt() {
         cp -f "$KEYBOX" "$PREV"
         log_line 'keybox backed up to keybox.prev.xml'
     fi
-    mv "$tmp" "$KEYBOX"
-    chmod 600 "$KEYBOX" 2>/dev/null
+    if [ -f "$INTEGRITY_BIN/keybox.sh" ]; then
+        if ! ( . "$INTEGRITY_BIN/keybox.sh"; keybox_install "$tmp" "fetched from $src" ); then
+            rm -f "$tmp"
+            state_set last_result install-failed
+            return 0
+        fi
+    else
+        mv "$tmp" "$KEYBOX"
+        chmod 600 "$KEYBOX" 2>/dev/null
+    fi
+    rm -f "$tmp"
     printf 'source=%s\nts=%s\nsha256=%s\n' "$src" "$(date '+%Y-%m-%d %H:%M:%S')" "$got" > "$SRC_STAMP"
     chmod 600 "$SRC_STAMP" 2>/dev/null
     state_set last_result installed
@@ -220,7 +297,7 @@ status() {
     src=$(source_value)
     printf 'auto_keybox: %s\n' "$(conf_get auto_keybox)"
     printf 'source: %s\n' "${src:-none}"
-    printf 'interval: %s h\n' "$(interval_hours)"
+    printf 'interval: %s h, requests per day: %s\n' "$(interval_hours)" "$(requests_per_day)"
     printf 'last_attempt: %s\n' "$(state_get last_attempt)"
     printf 'last_result: %s\n' "$(state_get last_result)"
     printf 'last_ok: %s\n' "$(state_get last_ok)"
@@ -240,7 +317,11 @@ status() {
 loop() {
     while :; do
         run
-        sleep "$TICK"
+        left=$(seconds_until_due)
+        [ "$left" -gt 0 ] || left=$TICK
+        [ "$left" -le 3600 ] || left=3600
+        log_line "keybox fetch: next attempt in ${left}s (one request per $(interval_hours)h)"
+        sleep "$left"
     done
 }
 

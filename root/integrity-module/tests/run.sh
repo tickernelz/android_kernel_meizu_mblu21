@@ -26,7 +26,7 @@ sp() { INTEGRITY_ROOT=$INTEGRITY_ROOT sh "$mod/bin/sp.sh" "$@"; }
 fresh
 targets reset >/dev/null
 n=$(wc -l < "$T/data/adb/tricky_store/target.txt")
-[ "$n" -eq 4 ] && ok "targets reset writes 4 packages" || no "targets reset writes 4 packages (got $n)"
+[ "$n" -eq 5 ] && ok "targets reset writes 5 packages" || no "targets reset writes 5 packages (got $n)"
 targets check >/dev/null && ok "default target list passes check" || no "default target list passes check"
 targets rm com.google.android.gms >/dev/null
 if targets check >/dev/null; then no "check fails when play services is missing"; else ok "check fails when play services is missing"; fi
@@ -78,9 +78,9 @@ close_box() {
     printf '    </Keybox>\n</AndroidAttestation>\n'
 }
 
-mkec ecleaf "Test EC Leaf" "Test EC CA"
+mkec ecleaf "Test EC Leaf" "Key Attestation CA1"
 mkec ecother "Test Other Leaf" "Test Other CA"
-mkrsa rsaleaf "Test RSA Leaf" "Test RSA CA"
+mkrsa rsaleaf "Test RSA Leaf" "Key Attestation CA1"
 
 {
     open_box sw
@@ -127,7 +127,7 @@ out=$(validate "$FX/valid.xml") && ok "validator accepts an ecdsa+rsa box with l
 printf '%s' "$out" | grep -q 'ec=1 rsa=1' && ok "validator counts one key per algorithm" || no "validator counts one key per algorithm ($out)"
 
 if out=$(validate "$FX/ec-only.xml"); then no "validator rejects an ecdsa-only box"; else ok "validator rejects an ecdsa-only box"; fi
-printf '%s' "$out" | grep -q 'invalid no-rsa' && ok "ecdsa-only rejection names the missing rsa key" || no "ecdsa-only rejection names the missing rsa key ($out)"
+printf '%s' "$out" | grep -q 'invalid incomplete: no rsa' && ok "ecdsa-only rejection names the missing rsa key" || no "ecdsa-only rejection names the missing rsa key ($out)"
 
 if out=$(validate "$FX/broken-chain.xml"); then no "validator rejects a certificate chain that does not link"; else ok "validator rejects a certificate chain that does not link"; fi
 printf '%s' "$out" | grep -q 'invalid chain-link-1-1' && ok "broken chain is reported per key and hop" || no "broken chain is reported per key and hop ($out)"
@@ -138,7 +138,27 @@ printf '%s' "$out" | grep -q 'invalid doctype' && ok "doctype rejection has its 
 if out=$(validate "$FX/no-key.xml"); then no "validator rejects a box without keys"; else ok "validator rejects a box without keys"; fi
 printf '%s' "$out" | grep -q 'invalid no-key' && ok "keyless box rejection has its own reason" || no "keyless box rejection has its own reason ($out)"
 
-if out=$(sh "$mod/bin/keybox-validate.sh" --structural "$FX/ec-only.xml"); then ok "structural mode accepts an incomplete owner keybox"; else no "structural mode accepts an incomplete owner keybox ($out)"; fi
+printf 'keybox_fetch_interval_h=6\n' > "$T/data/adb/tricky_store/integrity.conf"
+out=$(INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" status 2>&1)
+printf '%s' "$out" | grep -q 'requests per day: 4' && ok "a 6 hour interval means four requests per day" || no "a 6 hour interval means four requests per day ($out)"
+printf 'keybox_fetch_interval_h=0\n' > "$T/data/adb/tricky_store/integrity.conf"
+out=$(INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" status 2>&1)
+printf '%s' "$out" | grep -q 'interval: 6 h, requests per day: 4' && ok "an out-of-range interval falls back to six hours" || no "an out-of-range interval falls back to six hours ($out)"
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
+printf '%s' "$out" | grep -q '4 request(s)/day' && ok "the report states the request budget per day" || no "the report states the request budget per day ($out)"
+out=$(sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>/dev/null)
+printf '%s' "$out" | grep -q 'chain=google' && ok "a Google-rooted chain is classified as google" || no "a Google-rooted chain is classified as google ($out)"
+mkec softca "Software Leaf" "Software Test CA"
+{
+    open_box sw
+    emit_key ecdsa "$FX/softca-leaf.key" "$FX/softca-leaf.pem" "$FX/softca-ca.pem"
+    emit_key rsa "$FX/rsaleaf-leaf.key" "$FX/rsaleaf-leaf.pem" "$FX/rsaleaf-ca.pem"
+    close_box
+} > "$FX/software-root.xml"
+out=$(sh "$mod/bin/keybox-validate.sh" "$FX/software-root.xml" 2>/dev/null || true)
+printf '%s' "$out" | grep -q 'chain=untrusted' && ok "a self-signed software chain is classified as untrusted" || no "a self-signed software chain is classified as untrusted ($out)"
+if out=$(sh "$mod/bin/keybox-validate.sh" --structural "$FX/ec-only.xml"); then ok "structural mode still accepts the owner shape"; else no "structural mode still accepts the owner shape ($out)"; fi
+printf '%s' "$out" | grep -q 'incomplete: no rsa' && ok "structural mode names the missing rsa key" || no "structural mode names the missing rsa key ($out)"
 if out=$(validate "$FX/ec-only.xml"); then no "strict mode still rejects the same file"; else ok "strict mode still rejects the same file"; fi
 
 fetch() { INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" "$@"; }
@@ -165,7 +185,7 @@ grep -q 'is plain http' "$T/data/adb/tricky_store/integrity.log" && ok "the http
 printf 'auto_keybox=1\nkeybox_url=file://%s/ec-only.xml\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
 fetch now >/dev/null 2>&1
 cmp -s "$FX/valid2.xml" "$T/data/adb/tricky_store/keybox.xml" && ok "a keybox that fails validation never replaces the working one" || no "a keybox that fails validation never replaces the working one"
-grep -q 'keybox fetch rejected: invalid no-rsa' "$T/data/adb/tricky_store/integrity.log" && ok "the validation failure is logged with its reason" || no "the validation failure is logged with its reason"
+grep -q 'keybox fetch rejected: invalid incomplete: no rsa' "$T/data/adb/tricky_store/integrity.log" && ok "the validation failure is logged with its reason" || no "the validation failure is logged with its reason"
 
 printf 'auto_keybox=1\nkeybox_url=file://%s/broken-chain.xml\n' "$FX" > "$T/data/adb/tricky_store/integrity.conf"
 fetch now >/dev/null 2>&1
@@ -260,10 +280,29 @@ out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q 'certificate-hack mode' && ok "missing keybox reports certificate-hack mode" || no "missing keybox reports certificate-hack mode"
 printf '<Key algorithm="ecdsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
 out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
-printf '%s' "$out" | grep -q 'no rsa key' && ok "ecdsa-only keybox is called incomplete" || no "ecdsa-only keybox is called incomplete"
+printf '%s' "$out" | grep -q 'incomplete: no rsa' && ok "ecdsa-only keybox is called incomplete" || no "ecdsa-only keybox is called incomplete ($out)"
 cp "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.xml"
 out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q 'complete' && ok "ecdsa+rsa keybox is complete" || no "ecdsa+rsa keybox is complete"
+
+if out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_install \"$FX/ec-only.xml\" test" 2>&1); then
+    no "keybox_install refuses an ecdsa-only file"
+else
+    ok "keybox_install refuses an ecdsa-only file"
+fi
+grep -q 'install refused' "$T/data/adb/tricky_store/keybox.log" 2>/dev/null && ok "the refusal lands in keybox.log with its reason" || no "the refusal lands in keybox.log with its reason"
+
+INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_install \"$FX/valid.xml\" test" >/dev/null 2>&1
+cur=$(sha256sum "$T/data/adb/tricky_store/keybox.xml" | cut -d' ' -f1)
+[ "$cur" = "$(sha256sum "$FX/valid.xml" | cut -d' ' -f1)" ] && ok "keybox_install copies a complete keybox into place" || no "keybox_install copies a complete keybox into place"
+ls "$T/data/adb/tricky_store/backup"/keybox-*.xml >/dev/null 2>&1 && ok "the previous keybox is archived in the backup directory" || no "the previous keybox is archived in the backup directory"
+
+mkdir -p "$T/data/adb/teesim"
+INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_sync_teesim" >/dev/null 2>&1
+[ "$(sha256sum "$T/data/adb/teesim/keybox.xml" 2>/dev/null | cut -d' ' -f1)" = "$cur" ] && ok "the active keybox is mirrored to teesim when that module exists" || no "the active keybox is mirrored to teesim when that module exists"
+out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
+printf '%s' "$out" | grep -q 'teesim copy' && ok "the report names the teesim copy" || no "the report names the teesim copy ($out)"
+rm -rf "$T/data/adb/teesim"
 
 [ "$(sp next5 260918)" = 2026-10-05 ] && ok "next5 260918 -> 2026-10-05" || no "next5 260918 -> 2026-10-05"
 [ "$(sp next5 261231)" = 2027-01-05 ] && ok "next5 261231 rolls into 2027" || no "next5 261231 rolls into 2027"
@@ -338,11 +377,11 @@ INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/boot-ver
 
 fresh
 printf 'keybox_mode=software\nauto_keybox=0\nts_daemon=0\nauto_verdict=1\nkeep_adb=1\nverdict_delay=0\n' > "$T/data/adb/tricky_store/integrity.conf"
-printf '<Key algorithm="ecdsa">\n<Key algorithm="rsa">\n' > "$T/data/adb/modules/playintegrityfix/software-keybox.xml"
-printf '<Key algorithm="ecdsa">\n<Key algorithm="rsa">\n' > "$T/data/adb/tricky_store/keybox.xml"
-n1=$( (ls "$T/data/adb/tricky_store"/keybox.xml.bak.* 2>/dev/null || true) | wc -l | tr -d ' ')
+cp "$FX/valid.xml" "$T/data/adb/modules/playintegrityfix/software-keybox.xml"
+cp "$FX/valid.xml" "$T/data/adb/tricky_store/keybox.xml"
+n1=$( (ls "$T/data/adb/tricky_store"/backup/keybox-*.xml 2>/dev/null || true) | wc -l | tr -d ' ')
 INTEGRITY_BIN=$mod/bin INTEGRITY_ROOT=$T sh -c '. "$INTEGRITY_BIN/keybox.sh"; keybox_apply_mode' >/dev/null 2>&1
-n2=$( (ls "$T/data/adb/tricky_store"/keybox.xml.bak.* 2>/dev/null || true) | wc -l | tr -d ' ')
+n2=$( (ls "$T/data/adb/tricky_store"/backup/keybox-*.xml 2>/dev/null || true) | wc -l | tr -d ' ')
 [ "$n1" = "$n2" ] && ok "an identical software keybox makes no new backup" || no "an identical software keybox makes no new backup ($n1 -> $n2)"
 
 fresh
@@ -364,24 +403,26 @@ INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/fix-persist.sh" >/dev/null 2>&1
 grep -q 'setprop persist.sys.usb.config adb' "$T/setprop.trace" 2>/dev/null && ok "keep_adb=1 re-arms adb" || no "keep_adb=1 re-arms adb"
 
 fresh
-printf 'keybox_mode=auto\nts_daemon=0\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
-INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/service.sh" >/dev/null 2>&1
-grep -q 'ts_daemon=0: the TrickyStore loop is not started' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "service.sh does not start the daemon loop by default" || no "service.sh does not start the daemon loop by default"
-
-fresh
 cp -a "$mod" "$T/mod"
-printf '#!/bin/sh\necho run >> "%s/daemon.count"\n' "$T" > "$T/mod/daemon"
-chmod 755 "$T/mod/daemon"
-printf 'keybox_mode=auto\nts_daemon=1\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
+mkdir -p "$T/mod/teesim"
+printf '#!/bin/sh\ntouch "%s/teesim.started"\n' "$T" > "$T/mod/teesim/service.sh"
+chmod 755 "$T/mod/teesim/service.sh"
+printf 'keybox_mode=auto\nauto_keybox=0\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
 chmod +x "$T/bin/sleep"
 INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$T/mod/service.sh" >/dev/null 2>&1
-sleep 2
-c1=$(wc -l < "$T/daemon.count" 2>/dev/null | tr -d ' ')
-command sleep 2
-c2=$(wc -l < "$T/daemon.count" 2>/dev/null | tr -d ' ')
-[ "$c1" = 5 ] && [ "$c2" = 5 ] && ok "the daemon loop runs exactly five short-lived times, then stops" || no "the daemon loop runs exactly five short-lived times, then stops (got $c1 then $c2)"
-pkill -f "$T/mod/service.sh" 2>/dev/null || true
+command sleep 1
+grep -q 'teesim: starting the attestation provider' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "service.sh launches the bundled teesim provider" || no "service.sh launches the bundled teesim provider"
+[ -f "$T/teesim.started" ] && ok "the teesim service script actually ran" || no "the teesim service script actually ran"
+
+fresh
+mkdir -p "$T/data/adb/teesim"
+printf '{\n  "profiles": {\n    "default": {\n      "apps": [\n        "com.example.old"\n      ]\n    }\n  }\n}\n' > "$T/data/adb/teesim/config.json"
+printf 'com.google.android.gms\ncom.android.vending\ncom.example.extra\n' > "$T/data/adb/tricky_store/target.txt"
+INTEGRITY_ROOT=$T sh "$mod/bin/targets.sh" teesim >/dev/null 2>&1
+grep -q 'com.example.extra' "$T/data/adb/teesim/config.json" && ok "the teesim app list is rebuilt from target.txt" || no "the teesim app list is rebuilt from target.txt"
+grep -q 'com.example.old' "$T/data/adb/teesim/config.json" && no "the old teesim app list is replaced" || ok "the old teesim app list is replaced"
+python3 -c "import json,sys; json.load(open('$T/data/adb/teesim/config.json'))" 2>/dev/null && ok "the rewritten teesim config is still valid json" || no "the rewritten teesim config is still valid json"
 
 fresh
 printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"
