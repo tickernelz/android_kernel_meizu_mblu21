@@ -7,6 +7,8 @@ This pre-release carries two flashable images for the `kernelsu-next` root path:
 | `boot-kernelsu-next.img` | `boot` | GKI `5.15.149` kernel built from `android13-5.15-2024-07_r1` with the `kernelsu-next` driver integrated; AVB footer re-signed with the public AOSP test key |
 | `init_boot-kernelsu-next-lkm.img` | `init_boot` | stock init_boot ramdisk with the `kernelsu-next` LKM injection (no kernel change) |
 
+The kernel in this build sets `CONFIG_TMPFS_XATTR=y` (not set in the stock kernel on the phone or in earlier builds here) and keeps `CONFIG_OVERLAY_FS=y`; the build fails when either line is missing from `.config` (`kernel.config` in the artifact). The `init_boot` check decompresses the ramdisk and requires the cpio entries `kernelsu.ko` and `init.real`.
+
 `susfs_guard_lkm.ko` is the official KernelSU-Next SUSFS module for `android13-5.15` (release `v3.4.2`); the manager loads it, the kernel needs no SUSFS source patch.
 
 Pick one path, not both. Both require an unlocked bootloader.
