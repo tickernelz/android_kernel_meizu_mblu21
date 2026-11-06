@@ -2,7 +2,7 @@
 
 Three optional root variants built by [`root-modules.yml`](../.github/workflows/root-modules.yml). They are separate from the SUSFS variants of `build.yml` (`sukisu-ultra`, `kernelsu-next` with `susfs_guard_lkm`), which stay the default and are not changed. All three were run on the phone on 2026-11-06: `yukisu` loads and boots, `kasumi` and `yukizygisk` panic while loading because Unisoc's `native_hang_monitor` kills any module whose `init_module` has not returned after 2000 ms. Numbers in [Measured on the phone](#measured-on-the-phone-2026-11-06).
 
-All three use the LKM path: the stock `5.15.149` kernel stays in `boot`, and root comes from a loadable module. The phone only boots a Meizu-signed `boot` (see [AVB-POLICY.md](AVB-POLICY.md)), so a kernel with these drivers built in is not an option; YukiSU itself is LKM-only (`CONFIG_KSU=m`; its docs say built-in mode is not supported).
+All three use the LKM path: the stock `5.15.149` kernel stays in `boot`, and root comes from a loadable module. YukiSU itself is LKM-only (`CONFIG_KSU=m`; its docs say built-in mode is not supported). A `boot` signed with our own key does boot while the bootloader is unlocked (measured 2026-11-06, [AVB-POLICY.md](AVB-POLICY.md)), so a built-in kernel is not blocked by AVB; it is simply not what these variants are.
 
 ## Pick one
 

@@ -1,4 +1,4 @@
-Status of this build on the Meizu mBlu 21: `boot-<variant>.img` has not been tried on a phone, and the kernel path does not boot there (a SukiSU-Ultra kernel image written to `boot_a` on 2026-11-03 stopped at the logo). Use the `init_boot` LKM path; the images tested on the phone are in release `mblu21-root-20261102`.
+Status of this build on the Meizu mBlu 21: `boot-<variant>.img` has not been tried on a phone. The image that stopped at the logo on 2026-11-03 came from a branch whose KernelPatch step dropped the payload; this build has no such step, and the unlocked bootloader accepts a `boot` signed with another key. Use the `init_boot` LKM path; the images tested on the phone are in release `mblu21-root-20261102`.
 
 This pre-release carries two flashable images for the `sukisu-ultra` root path:
 

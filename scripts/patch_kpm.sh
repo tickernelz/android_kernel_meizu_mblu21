@@ -25,6 +25,12 @@ fetch kptools-linux "$kptools_sha256"
 fetch kpimg "$kpimg_sha256"
 chmod +x "$workdir/kptools-linux"
 
+"$workdir/kptools-linux" -l -i "$image" > "$workdir/input.txt"
+if grep -qx 'patched=true' "$workdir/input.txt"; then
+  echo "$image is already patched with KernelPatch; pass the unpatched kernel Image" >&2
+  exit 1
+fi
+
 superkey=$(head -c 32 /dev/urandom | sha256sum | cut -c1-32)
 "$workdir/kptools-linux" -p -i "$image" -k "$workdir/kpimg" --skey-fd 3 -o "$workdir/Image" 3<<<"$superkey" > "$workdir/patch.log"
 unset superkey

@@ -52,4 +52,4 @@ Raw output: `verify-on-phone-20261105.txt`.
 
 Not tested: the `spd_dump` write path with this image, a phone not already rooted, and the stock Meizu ROM with r2. Observed once and not explained: after the reboot into this image, USB came up as MTP only and adb stayed off for 14 minutes (`AdbService` read `adb_enabled=0` at boot) until USB debugging was switched on again in Developer options.
 
-The kernel path (`boot-<variant>.img`) still does not boot on this phone; see the README.
+The kernel path (`boot-<variant>.img`) is not tried on this phone; see the README.

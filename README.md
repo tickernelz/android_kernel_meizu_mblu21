@@ -106,7 +106,7 @@ Six kinds of release:
 | `mblu21-pixelos-root-20261105` | **Tested on hardware**, PixelOS 17 build `20261105-1507` (the image also fits `20261105-1807`, which has the same stock `init_boot`). `init_boot` patched with SukiSU-Ultra `v4.3.0-r2`, `ksud`/`kernelsu.ko`/`ksuinit` built from source, the SUSFS guard module (unchanged), the upstream r2 manager APK, the build log, `build-sukisu.sh` and `patch-init-boot.sh`, the on-phone check output, and `SHA256SUMS` |
 | `mblu21-pixelos-root-20261106` | **Tested on hardware**, PixelOS 17 build `20261105-1807` (`20261105-1800` on the phone; and every build with the same stock `init_boot`). Two `init_boot` images, SukiSU-Ultra `v4.3.0-r2` and KernelSU-Next `v3.4.2`, with `ksud`/`kernelsu.ko`/`ksuinit` built from the release tags (both `kernelsu.ko` and the KernelSU-Next SUSFS guard byte-identical to upstream), the SUSFS guard module, both upstream manager APKs, `build-sukisu.sh`, `build-ksunext.sh`, `patch-init-boot.sh`, both build logs, the on-phone check output, and `SHA256SUMS` |
 | `mblu21-susfs-lkm-20261102` | **Tested on hardware.** The SUSFS guard KernelSU module alone (`susfs_guard_lkm.zip`, same bytes as `susfs_guard_lkm-module.zip` above) for SukiSU-Ultra in LKM mode, plus `SHA256SUMS` |
-| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path does not boot on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
+| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path is not tried on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 | `yukisu|kasumi|yukizygisk-<tag>-untested` (CI pre-release) | Built by `root-modules.yml`, **not tried on the phone**: the pinned upstream modules (YukiSU LKM, APK and `ksud` with signatures; `kasumi_lkm.ko` built from source plus its loader zip; the YukiZygisk zip), `module-abi-<variant>.txt`, `SHA256SUMS-<variant>`. See [docs/ROOT-MODULES.md](docs/ROOT-MODULES.md) |
 
 ## Install
@@ -115,7 +115,7 @@ Six kinds of release:
 
 Prerequisites:
 
-- Unlocked bootloader. `vbmeta` on this phone must stay Meizu-signed even when unlocked, so nothing here replaces it; `init_boot` is the one chain partition whose verification is not enforced.
+- Unlocked bootloader. `vbmeta` on this phone must stay Meizu-signed even when unlocked, so nothing here replaces it. The chained partitions `boot`, `init_boot` and `vendor_boot` are verified, but while unlocked a mismatch is logged and ignored ([docs/AVB-POLICY.md](docs/AVB-POLICY.md)).
 - A full stock backup. `boot_a.bin` and `init_boot_a.bin` from the phone are the only reliable way back. The untouched U01005 images are also in the stock firmware release [mblu21-stock-U01005-20261031](https://github.com/tickernelz/android_stock_meizu_mblu21/releases/tag/mblu21-stock-U01005-20261031) as `boot_a.bin` and `init_boot_a.bin`.
 - `adb`, and `spd_dump` from [TomKing062/CVE-2022-38694_unlock_bootloader](https://github.com/TomKing062/CVE-2022-38694_unlock_bootloader/releases) for the writes. `fastboot flash` does not work on this unit.
 
@@ -188,7 +188,7 @@ cd ~/tools/linux
 
 ## What is not touched
 
-- `vendor_boot`: recovery and the first-stage ramdisk stay as shipped. Recovery images live in [android_device_meizu_mblu21-recovery](https://github.com/tickernelz/android_device_meizu_mblu21-recovery), but note that this bootloader verifies `vendor_boot` against a Meizu key, so a foreign recovery does not currently load ([docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md)).
+- `vendor_boot`: recovery and the first-stage ramdisk stay as shipped. Recovery images live in [android_device_meizu_mblu21-recovery](https://github.com/tickernelz/android_device_meizu_mblu21-recovery), and a foreign `vendor_boot` loads while the bootloader is unlocked ([docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md), [docs/AVB-POLICY.md](docs/AVB-POLICY.md)).
 - `vendor_dlkm`, `system_dlkm`, `vendor`, `odm`, `dtbo`, `vbmeta*`: untouched. Nothing here needs a disabled verification chain beyond the unlocked bootloader.
 - The phone itself: nothing in this repository writes to a device; images are built from sources and files in this repository.
 
