@@ -11,6 +11,9 @@ on:
       - 'keys/yukisu-anatdx.asc'
       - 'scripts/build_kasumi.sh'
       - 'scripts/kallsyms-requirements.txt'
+      - 'scripts/patch_kpm.sh'
+      - 'scripts/replace_boot_kernel.sh'
+      - '.github/workflows/scripts.yml'
   workflow_dispatch:
     inputs:
       release_tag:
