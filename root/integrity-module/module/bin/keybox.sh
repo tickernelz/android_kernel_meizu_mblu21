@@ -92,11 +92,18 @@ keybox_install() {
     if [ -f "$KEYBOX" ]; then
         keybox_backup "$KEYBOX" >/dev/null
     fi
-    if ! cp -f "$kb_in_src" "$KEYBOX" 2>/dev/null; then
-        keylog "install failed: cannot write $KEYBOX"
+    kb_in_tmp=$KEYBOX.incoming.$$
+    if ! cp -f "$kb_in_src" "$kb_in_tmp" 2>/dev/null; then
+        rm -f "$kb_in_tmp"
+        keylog "install failed: cannot stage $KEYBOX.incoming"
         return 1
     fi
-    chmod 600 "$KEYBOX" 2>/dev/null
+    chmod 600 "$kb_in_tmp" 2>/dev/null
+    if ! mv -f "$kb_in_tmp" "$KEYBOX" 2>/dev/null; then
+        rm -f "$kb_in_tmp"
+        keylog "install failed: cannot replace $KEYBOX"
+        return 1
+    fi
     keylog "installed $kb_in_src ($kb_in_why) sha256=$(keybox_sha256 "$KEYBOX") $kb_in_out"
     keybox_sync_teesim
     return 0
