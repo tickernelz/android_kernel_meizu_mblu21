@@ -287,7 +287,7 @@ jobs:
           echo "$STOCK_INIT_BOOT_SHA256  $RUNNER_TEMP/init_boot_a.bin" | sha256sum -c -
           scripts/patch_init_boot.sh "${{ matrix.variant }}" "$RUNNER_TEMP/ksud" "$RUNNER_TEMP/kernelsu.ko" "$RUNNER_TEMP/init_boot_a.bin" "$RUNNER_TEMP/lkm-out" | tee -a "$RUNNER_TEMP/lkm-${{ matrix.variant }}.log"
           image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
-          python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 | tee "$RUNNER_TEMP/lkm-verify-${{ matrix.variant }}.json"
+          python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --cpio-entry kernelsu.ko --cpio-entry init.real --list-cpio --min-ramdisk-size 2200000 | tee "$RUNNER_TEMP/lkm-verify-${{ matrix.variant }}.json"
           cp "$image" "$RUNNER_TEMP/init_boot-${{ matrix.variant }}-lkm.img"
           (cd "$RUNNER_TEMP" && sha256sum "init_boot-${{ matrix.variant }}-lkm.img" | tee "init_boot-${{ matrix.variant }}-lkm.img.sha256")
 
@@ -394,7 +394,7 @@ jobs:
           cat "$RUNNER_TEMP/patch.log" >> "$OUT/lkm-bakasu.log"
           grep -qx 'patched with bundled ksuinit' "$RUNNER_TEMP/patch.log"
           image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
-          python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 \
+          python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --cpio-entry kernelsu.ko --cpio-entry init.real --list-cpio --min-ramdisk-size 2200000 \
             | tee -a "$OUT/lkm-bakasu.log"
           cp "$image" "$OUT/init_boot-PixelOS_mblu21-17.0-20261105-1807-bakasu-$BAKASU_TAG.img"
 
