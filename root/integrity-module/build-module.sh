@@ -3,10 +3,10 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 
-ts_url=https://github.com/5ec1cff/TrickyStore/releases/download/1.4.1/Tricky-Store-v1.4.1-245-72b2e84-release.zip
-ts_sha=2f5e73fcba0e4e43b6e96b38f333cbe394873e3a81cf8fe1b831c2fbd6c46ea9
 pif_url=https://github.com/osm0sis/PlayIntegrityFork/releases/download/v19/PlayIntegrityFork-v19.zip
 pif_sha=83b4d5f32743805c5b5a69361d73b8ab9c095325e24f20711afa1abea837b58f
+teesim_url=https://github.com/JingMatrix/TEESimulator/releases/download/canary-76/TEESimulator-v4.0-76-06f9f2e-Release.zip
+teesim_sha=eb9af65a50f44bb4c887aeee7a2c110988cd54835ce80667488d09957aa3b376
 stamp=1767225600
 
 out=${1:-$root/mblu21-integrity.zip}
@@ -27,26 +27,13 @@ fetch() {
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-fetch "$ts_url" "$ts_sha" "$cache/Tricky-Store-1.4.1.zip"
 fetch "$pif_url" "$pif_sha" "$cache/PlayIntegrityFork-v19.zip"
+fetch "$teesim_url" "$teesim_sha" "$cache/TEESimulator-canary76.zip"
 
-mkdir -p "$work/ts" "$work/pif" "$work/stage/zygisk"
-unzip -q "$cache/Tricky-Store-1.4.1.zip" -d "$work/ts"
+mkdir -p "$work/pif" "$work/teesim" "$work/stage/zygisk" "$work/stage/teesim/arm64-v8a"
 unzip -q "$cache/PlayIntegrityFork-v19.zip" -d "$work/pif"
+unzip -q "$cache/TEESimulator-canary76.zip" -d "$work/teesim"
 cp -a "$here/module/." "$work/stage/"
-
-for f in service.apk daemon mazoku machikado.arm64 sepolicy.rule; do
-    cp "$work/ts/$f" "$work/stage/$f"
-done
-cp "$work/ts/machikado.arm64" "$work/stage/machikado"
-cp "$work/ts/lib/arm64/libtricky_store.so" "$work/stage/libtricky_store.so"
-cp "$work/ts/keybox.xml" "$work/stage/software-keybox.xml"
-
-for f in service.apk daemon mazoku machikado.arm64 lib/arm64/libtricky_store.so keybox.xml; do
-    want=$(cat "$work/ts/$f.sha256")
-    got=$(sha256sum "$work/ts/$f" | cut -d' ' -f1)
-    [ "$want" = "$got" ] || { echo "upstream sha256 mismatch for $f" >&2; exit 1; }
-done
 
 for f in classes.dex common_func.sh common_setup.sh app_replace_list.txt example.pif.prop; do
     cp "$work/pif/$f" "$work/stage/"
@@ -58,8 +45,25 @@ mkdir -p "$work/stage/META-INF/com/google/android"
 cp "$work/pif/META-INF/com/google/android/update-binary" "$work/stage/META-INF/com/google/android/update-binary"
 cp "$work/pif/META-INF/com/google/android/updater-script" "$work/stage/META-INF/com/google/android/updater-script"
 
-chmod 755 "$work/stage"/*.sh "$work/stage"/bin/*.sh "$work/stage"/daemon "$work/stage"/machikado "$work/stage"/mazoku
-chmod 644 "$work/stage/service.apk" "$work/stage/libtricky_store.so" "$work/stage/classes.dex" "$work/stage/pif.prop" "$work/stage/target.txt" "$work/stage/security_patch.txt" "$work/stage/integrity.conf" "$work/stage/software-keybox.xml"
+for f in daemon classes.dex config.default.json service.sh; do
+    cp "$work/teesim/$f" "$work/stage/teesim/$f"
+done
+for f in inject libteesim_keymint.so libteesim_keystore.so libteesim_logcat.so teesim-uds; do
+    cp "$work/teesim/arm64-v8a/$f" "$work/stage/teesim/arm64-v8a/$f"
+done
+
+{
+    printf '# merged by build-module.sh from teesim/sepolicy.rule\n'
+    grep -vE '^[[:space:]]*(#|$)' "$work/teesim/sepolicy.rule"
+} > "$work/stage/sepolicy.rule"
+cp "$work/teesim/sepolicy.rule" "$work/stage/teesim/sepolicy.rule.upstream"
+
+chmod 755 "$work/stage"/*.sh "$work/stage"/bin/*.sh "$work/stage/teesim/daemon" "$work/stage/teesim/service.sh" \
+    "$work/stage/teesim/arm64-v8a/inject" "$work/stage/teesim/arm64-v8a/teesim-uds"
+chmod 644 "$work/stage/classes.dex" "$work/stage/pif.prop" "$work/stage/target.txt" \
+    "$work/stage/security_patch.txt" "$work/stage/integrity.conf" "$work/stage/teesim/classes.dex" \
+    "$work/stage/teesim/config.default.json" "$work/stage/teesim/arm64-v8a/libteesim_keymint.so" \
+    "$work/stage/teesim/arm64-v8a/libteesim_keystore.so" "$work/stage/teesim/arm64-v8a/libteesim_logcat.so"
 find "$work/stage" -exec touch -m -d "@$stamp" {} +
 
 rm -f "$out"

@@ -26,7 +26,7 @@ sp() { INTEGRITY_ROOT=$INTEGRITY_ROOT sh "$mod/bin/sp.sh" "$@"; }
 fresh
 targets reset >/dev/null
 n=$(wc -l < "$T/data/adb/tricky_store/target.txt")
-[ "$n" -eq 4 ] && ok "targets reset writes 4 packages" || no "targets reset writes 4 packages (got $n)"
+[ "$n" -eq 5 ] && ok "targets reset writes 5 packages" || no "targets reset writes 5 packages (got $n)"
 targets check >/dev/null && ok "default target list passes check" || no "default target list passes check"
 targets rm com.google.android.gms >/dev/null
 if targets check >/dev/null; then no "check fails when play services is missing"; else ok "check fails when play services is missing"; fi
@@ -403,25 +403,26 @@ INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/fix-persist.sh" >/dev/null 2>&1
 grep -q 'setprop persist.sys.usb.config adb' "$T/setprop.trace" 2>/dev/null && ok "keep_adb=1 re-arms adb" || no "keep_adb=1 re-arms adb"
 
 fresh
-printf 'keybox_mode=auto\nts_daemon=0\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
-INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/ts-daemon.sh" loop >/dev/null 2>&1
-grep -q 'ts_daemon=0: the provider loop is not started' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "ts_daemon=0 keeps the provider loop off" || no "ts_daemon=0 keeps the provider loop off"
-
-fresh
 cp -a "$mod" "$T/mod"
-printf '#!/bin/sh\necho run >> "%s/daemon.count"\n' "$T" > "$T/data/adb/modules/playintegrityfix/daemon"
-chmod 755 "$T/data/adb/modules/playintegrityfix/daemon"
-printf 'keybox_mode=auto\nts_daemon=1\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
+mkdir -p "$T/mod/teesim"
+printf '#!/bin/sh\ntouch "%s/teesim.started"\n' "$T" > "$T/mod/teesim/service.sh"
+chmod 755 "$T/mod/teesim/service.sh"
+printf 'keybox_mode=auto\nauto_keybox=0\nauto_verdict=0\nkeep_adb=1\n' > "$T/data/adb/tricky_store/integrity.conf"
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/sleep"
 chmod +x "$T/bin/sleep"
-printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\nexit 0\n' > "$T/bin/getprop"
-chmod +x "$T/bin/getprop"
-INTEGRITY_ROOT=$T PATH=$T/bin:$PATH TS_BOOT_WAIT=0 TS_KEYSTORE_WAIT=0 TS_RESTART_MIN=1 TS_LOOP_MAX=3 sh "$T/mod/bin/ts-daemon.sh" loop >/dev/null 2>&1
-c1=$(wc -l < "$T/daemon.count" 2>/dev/null | tr -d ' ')
-[ "$c1" = 3 ] && ok "the supervisor restarts a dying provider instead of giving up" || no "the supervisor restarts a dying provider instead of giving up (got $c1)"
-grep -q 'ts_daemon: restarting in 1s' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "a short run retries after the minimum backoff" || no "a short run retries after the minimum backoff"
-grep -q 'ts_daemon: restarting in 2s' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "the backoff doubles while the provider keeps dying" || no "the backoff doubles while the provider keeps dying"
-grep -q 'ts_daemon: exited rc=' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "every provider exit is logged with its code" || no "every provider exit is logged with its code"
+INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$T/mod/service.sh" >/dev/null 2>&1
+command sleep 1
+grep -q 'teesim: starting the attestation provider' "$T/data/adb/tricky_store/integrity.log" 2>/dev/null && ok "service.sh launches the bundled teesim provider" || no "service.sh launches the bundled teesim provider"
+[ -f "$T/teesim.started" ] && ok "the teesim service script actually ran" || no "the teesim service script actually ran"
+
+fresh
+mkdir -p "$T/data/adb/teesim"
+printf '{\n  "profiles": {\n    "default": {\n      "apps": [\n        "com.example.old"\n      ]\n    }\n  }\n}\n' > "$T/data/adb/teesim/config.json"
+printf 'com.google.android.gms\ncom.android.vending\ncom.example.extra\n' > "$T/data/adb/tricky_store/target.txt"
+INTEGRITY_ROOT=$T sh "$mod/bin/targets.sh" teesim >/dev/null 2>&1
+grep -q 'com.example.extra' "$T/data/adb/teesim/config.json" && ok "the teesim app list is rebuilt from target.txt" || no "the teesim app list is rebuilt from target.txt"
+grep -q 'com.example.old' "$T/data/adb/teesim/config.json" && no "the old teesim app list is replaced" || ok "the old teesim app list is replaced"
+python3 -c "import json,sys; json.load(open('$T/data/adb/teesim/config.json'))" 2>/dev/null && ok "the rewritten teesim config is still valid json" || no "the rewritten teesim config is still valid json"
 
 fresh
 printf '#!/bin/sh\n[ "$1" = sys.boot_completed ] && echo 1\n' > "$T/bin/getprop"

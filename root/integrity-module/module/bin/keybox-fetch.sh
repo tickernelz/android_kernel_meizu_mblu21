@@ -54,6 +54,25 @@ seconds_until_due() {
     printf '%s' "$left"
 }
 
+catalog_pick() {
+    cat_url=$(conf_get keybox_catalog)
+    [ -n "$cat_url" ] || return 1
+    cache=$TS_DIR/.catalog.json
+    curl -fsSL --max-time 30 -o "$cache.part" "$cat_url" 2>/dev/null || { rm -f "$cache.part"; return 1; }
+    mv "$cache.part" "$cache"
+    entry=$(tr -d '\r\n' < "$cache" | sed 's/},{/}\n{/g' | grep '"revoked":false' | grep '"softbanned":false' | head -n 1)
+    if [ -z "$entry" ]; then
+        entry=$(tr -d '\r\n' < "$cache" | sed 's/},{/}\n{/g' | grep '"revoked":false' | head -n 1)
+    fi
+    [ -n "$entry" ] || return 1
+    cat_source=$(printf '%s' "$entry" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
+    cat_version=$(printf '%s' "$entry" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+    [ -n "$cat_source" ] && [ -n "$cat_version" ] || return 1
+    base=${cat_url%/catalog}
+    enc=$(printf '%s' "$cat_source" | sed 's/@/%40/g; s/ /%20/g')
+    printf '%s/key/%s/%s' "$base" "$enc" "$cat_version"
+}
+
 source_value() {
     u=$(conf_get keybox_url)
     if [ -n "$u" ]; then
@@ -61,7 +80,11 @@ source_value() {
         return 0
     fi
     f=$(conf_get keybox_file)
-    [ -n "$f" ] && printf '%s' "$f"
+    if [ -n "$f" ]; then
+        printf '%s' "$f"
+        return 0
+    fi
+    catalog_pick
 }
 
 is_due() {
@@ -90,6 +113,25 @@ fetch_to() {
             p=${src#file://}
             [ -f "$p" ] || return 1
             cp -f "$p" "$dest"
+            ;;
+        */key/*)
+            if command -v curl >/dev/null 2>&1; then
+                curl -fsSL --max-time 40 --proto '=https' --proto-redir '=https' -o "$dest.raw" "$src" || return 1
+                if grep -q '<AndroidAttestation' "$dest.raw" 2>/dev/null; then
+                    mv "$dest.raw" "$dest"
+                else
+                    shuf='1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe'
+                    std='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+                    if ! base64 -d < "$dest.raw" > "$dest" 2>/dev/null || ! grep -q '<' "$dest" 2>/dev/null; then
+                        tr "$shuf" "$std" < "$dest.raw" > "$dest.b64"
+                        base64 -d < "$dest.b64" > "$dest" 2>/dev/null
+                    fi
+                    rm -f "$dest.raw" "$dest.b64"
+                    grep -q '<AndroidAttestation' "$dest" 2>/dev/null || return 1
+                fi
+            else
+                return 4
+            fi
             ;;
         /*)
             [ -f "$src" ] || return 1

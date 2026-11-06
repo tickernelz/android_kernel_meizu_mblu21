@@ -12,8 +12,8 @@ status() {
     printf 'pif companion: %s\n' "$([ -f "$MOD_DIR/zygisk/arm64-v8a.so" ] && echo present || echo missing)"
     printf 'targets: %s entries\n' "$(grep -cv '^#' "$TARGETS_FILE" 2>/dev/null | tr -d ' ')"
     printf 'security patch: %s\n' "$(file_get "$PIF_PROP" SECURITY_PATCH)"
-    printf 'keybox_mode: %s, ts_daemon: %s, auto_verdict: %s, keep_adb: %s\n' \
-        "$(conf_get keybox_mode)" "$(conf_get ts_daemon)" "$(conf_get auto_verdict)" "$(conf_get keep_adb)"
+    printf 'keybox_mode: %s, auto_keybox: %s, auto_verdict: %s, keep_adb: %s\n' \
+        "$(conf_get keybox_mode)" "$(conf_get auto_keybox)" "$(conf_get auto_verdict)" "$(conf_get keep_adb)"
     keybox_report
     printf 'last verdict in logcat: %s\n' "$(logcat -d -v brief 2>/dev/null | grep -o 'MEETS_[A-Z_]*' | tail -n 1)"
 }
@@ -35,28 +35,46 @@ doctor() {
         printf '[fail] the module is disabled\n'
         rc=1
     fi
-    for f in classes.dex zygisk/arm64-v8a.so service.apk libtricky_store.so machikado daemon pif.prop; do
+    for f in classes.dex zygisk/arm64-v8a.so pif.prop teesim/daemon teesim/classes.dex teesim/arm64-v8a/libteesim_keymint.so teesim/arm64-v8a/inject; do
         if [ ! -e "$MOD_DIR/$f" ]; then
             printf '[fail] missing %s\n' "$f"
             rc=1
         fi
     done
 
-    printf '== keystore provider\n'
-    if [ -d "$INTEGRITY_ROOT/data/adb/modules/teesim" ] && [ ! -e "$INTEGRITY_ROOT/data/adb/modules/teesim/disable" ]; then
-        printf '[ok] TEESimulator is installed and enabled; it serves key attestation from inside keystore\n'
-        if [ -f "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml" ]; then
-            printf '[ok] teesim keybox is present sha256=%s\n' "$(sha256sum "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml" | cut -d' ' -f1)"
+    printf '== attestation provider\n'
+    if [ -f "$MOD_DIR/teesim/daemon" ]; then
+        printf '[ok] the TEESim payload is bundled at %s/teesim\n' "$MOD_DIR"
+    else
+        printf '[fail] the TEESim payload is missing under %s/teesim\n' "$MOD_DIR"
+        rc=1
+    fi
+    ts_pid=$(pidof teesim 2>/dev/null | awk '{print $1}')
+    if [ -n "$ts_pid" ]; then
+        printf '[ok] teesim control daemon alive pid=%s\n' "$ts_pid"
+    else
+        printf '[fail] no teesim process: key attestation is not redirected\n'
+        rc=1
+    fi
+    ks_pid=$(pidof keystore2 2>/dev/null | awk '{print $1}')
+    if [ -n "$ks_pid" ]; then
+        ks_maps=$(grep -c libteesim "/proc/$ks_pid/maps" 2>/dev/null | tr -d ' ')
+        if [ "${ks_maps:-0}" -ge 1 ]; then
+            printf '[ok] libteesim mapped %s time(s) inside keystore2 pid=%s\n' "$ks_maps" "$ks_pid"
         else
-            printf '[fail] teesim module is enabled but %s is missing\n' "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml"
+            printf '[fail] libteesim is not mapped inside keystore2, so nothing intercepts attestation\n'
             rc=1
         fi
-    fi
-    if [ -f "$INTEGRITY_BIN/ts-daemon.sh" ]; then
-        provider_out=$(sh "$INTEGRITY_BIN/ts-daemon.sh" status 2>&1) || rc=1
-        printf '%s\n' "$provider_out"
     else
-        printf '[fail] bin/ts-daemon.sh is missing, so nothing keeps the certificate provider alive\n'
+        printf '[fail] keystore2 is not running\n'
+        rc=1
+    fi
+    if [ -f "$TEESIM_CONF" ]; then
+        apps=$(sed -n '/"apps"/,/]/p' "$TEESIM_CONF" 2>/dev/null | grep -c '"')
+        apps=$((apps - 1))
+        printf '[info] teesim config: %s, profile apps: %s\n' "$TEESIM_CONF" "$apps"
+    else
+        printf '[fail] %s is missing; the interceptor has no profile\n' "$TEESIM_CONF"
         rc=1
     fi
 

@@ -1,17 +1,19 @@
 # mblu21 integrity module
 
-One KernelSU/Magisk zip for Play Integrity on the Meizu mBlu 21 (M416H): Tricky Store
-1.4.1 handles keystore attestation, Play Integrity Fork v19 supplies the certified
-fingerprint and prop cleanup, and this module owns the target list, the security patch
-level and the keybox policy. It replaces the combined third-party drop-in that occupied
-`/data/adb/tricky_store` and fetched a keybox over plain HTTP at boot.
+One KernelSU/Magisk zip for Play Integrity on the Meizu mBlu 21 (M416H): Play Integrity
+Fork v19 supplies the certified fingerprint and prop cleanup, TEESimulator v4.0 runs AOSP's
+reference KeyMint inside the real `keystore2` and re-signs attestation from the keybox, and
+this module owns the target list, the security patch level and the keybox policy. It
+replaces the combined third-party drop-in that occupied `/data/adb/tricky_store` and fetched
+a keybox over plain HTTP at boot.
 
 | File | Purpose |
 |---|---|
 | `module/module.prop` | module identity: id `playintegrityfix`, version `v1.0.0` |
 | `module/customize.sh` | installer: moves the old `/data/adb/modules/tricky_store` aside, keeps the keybox already on the phone, seeds the config |
 | `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then hand the certificate provider to `bin/ts-daemon.sh` |
-| `module/bin/ts-daemon.sh` | supervises the Tricky Store certificate provider: waits for `sys.boot_completed` and keystore, restarts it with a capped backoff, logs every start and exit, and reports the state to `doctor` |
+| `module/teesim/` | the pinned TEESimulator payload (`daemon`, `classes.dex`, `arm64-v8a/`), started from `module/service.sh`; its `sepolicy.rule` is merged into the module root at build time with comment lines stripped |
+| `module/bin/webui.sh`, `module/webroot/` | WebUI: provider and keystore state, active keybox (sha256, algorithms, chain, age, source), last verdict, and a refresh button |
 | `module/bin/integrity.sh` | `status`, `doctor`, `verdict`, `keybox`, `targets`, `sp` |
 | `module/bin/keybox.sh` | keybox completeness report, the install-mode switch, timestamped backups under `backup/`, the `keybox.log` trail and the TEESimulator mirror |
 | `module/bin/keybox-fetch.sh` | scheduled fetch, validation gate, backup, rollback, one log line per attempt |
