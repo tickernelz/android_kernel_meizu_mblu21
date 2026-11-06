@@ -218,7 +218,9 @@ SELinux stays **Enforcing** with the LKM path — there is no reason to set perm
 
 Root alone is detected by most banking apps. SUSFS hides the interesting parts: mount points, `/proc` entries, module list, kernel version, and the root driver's own symbols.
 
-Install the guard module; it is included in the same release as `susfs_guard_lkm-module.zip`:
+**The guard module is for the LKM path only** (stock `boot`, root from a patched `init_boot`, as in §3-§5). A `boot` with SUSFS built in (the `boot-<variant>.img` kernel path, release `sukisu-ultra-20261106-untested`) already carries SUSFS: do not install the guard module there. Measured on this phone on 2026-11-06 with `boot-sukisu-ultra-kpm`: `ksud susfs implementation` reported `builtin` and `susfs_guard_lkm` was not in `/proc/modules` although the module was installed. If it is installed on a built-in kernel, remove it with `ksud module uninstall susfs_guard_lkm` and reboot.
+
+On the LKM path, install the guard module; it is included in the same release as `susfs_guard_lkm-module.zip`:
 
 ```sh
 adb push susfs_guard_lkm-module.zip /data/local/tmp/
@@ -275,7 +277,7 @@ One host command proves root, the manager, SELinux and SUSFS:
 adb shell su -c 'id; /data/adb/ksud -V; getenforce; /data/adb/ksud susfs implementation'
 ```
 
-Expected: `uid=0(root) ... context=u:r:ksu:s0`, a `ksud` version, `Enforcing`, and `lkm` once the guard module from §6 is installed.
+Expected: `uid=0(root) ... context=u:r:ksu:s0`, a `ksud` version, `Enforcing`, and `lkm` once the guard module from §6 is installed (`builtin` on a kernel with SUSFS built in, without the module).
 
 Compare the untouched partitions against the stock hashes; only `init_boot_a` may differ:
 
