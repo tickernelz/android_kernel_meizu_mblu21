@@ -78,9 +78,9 @@ close_box() {
     printf '    </Keybox>\n</AndroidAttestation>\n'
 }
 
-mkec ecleaf "Test EC Leaf" "Test EC CA"
+mkec ecleaf "Test EC Leaf" "Key Attestation CA1"
 mkec ecother "Test Other Leaf" "Test Other CA"
-mkrsa rsaleaf "Test RSA Leaf" "Test RSA CA"
+mkrsa rsaleaf "Test RSA Leaf" "Key Attestation CA1"
 
 {
     open_box sw
@@ -146,6 +146,17 @@ out=$(INTEGRITY_ROOT=$T sh "$mod/bin/keybox-fetch.sh" status 2>&1)
 printf '%s' "$out" | grep -q 'interval: 6 h, requests per day: 4' && ok "an out-of-range interval falls back to six hours" || no "an out-of-range interval falls back to six hours ($out)"
 out=$(INTEGRITY_ROOT=$T sh -c ". \"$mod/bin/keybox.sh\"; keybox_report")
 printf '%s' "$out" | grep -q '4 request(s)/day' && ok "the report states the request budget per day" || no "the report states the request budget per day ($out)"
+out=$(sh "$mod/bin/keybox-validate.sh" "$FX/valid.xml" 2>/dev/null)
+printf '%s' "$out" | grep -q 'chain=google' && ok "a Google-rooted chain is classified as google" || no "a Google-rooted chain is classified as google ($out)"
+mkec softca "Software Leaf" "Software Test CA"
+{
+    open_box sw
+    emit_key ecdsa "$FX/softca-leaf.key" "$FX/softca-leaf.pem" "$FX/softca-ca.pem"
+    emit_key rsa "$FX/rsaleaf-leaf.key" "$FX/rsaleaf-leaf.pem" "$FX/rsaleaf-ca.pem"
+    close_box
+} > "$FX/software-root.xml"
+out=$(sh "$mod/bin/keybox-validate.sh" "$FX/software-root.xml" 2>/dev/null || true)
+printf '%s' "$out" | grep -q 'chain=untrusted' && ok "a self-signed software chain is classified as untrusted" || no "a self-signed software chain is classified as untrusted ($out)"
 if out=$(sh "$mod/bin/keybox-validate.sh" --structural "$FX/ec-only.xml"); then ok "structural mode still accepts the owner shape"; else no "structural mode still accepts the owner shape ($out)"; fi
 printf '%s' "$out" | grep -q 'incomplete: no rsa' && ok "structural mode names the missing rsa key" || no "structural mode names the missing rsa key ($out)"
 if out=$(validate "$FX/ec-only.xml"); then no "strict mode still rejects the same file"; else ok "strict mode still rejects the same file"; fi

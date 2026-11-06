@@ -102,6 +102,12 @@ while IFS= read -r line; do
         rm -rf "$tmp"
         fail "chain-root-$idx"
     fi
+    if [ -z "$root_der_ok" ]; then
+        if sed '1d;$d' "$tmp/cert-$idx-$count.pem" 2>/dev/null | base64 -d 2>/dev/null | strings -a 2>/dev/null | grep -qE 'Key Attestation CA|Google LLC'; then
+            root_google=1
+        fi
+        root_der_ok=1
+    fi
 done < "$tmp/split.txt"
 
 rm -rf "$tmp"
@@ -111,6 +117,18 @@ if [ "$structural" = 0 ]; then
     [ "$rsa" -ge 1 ] || fail 'incomplete: no rsa'
 fi
 
-printf 'valid size=%s keys=%s certs=%s ec=%s rsa=%s\n' "$size" "$keys" "$certs" "$ec" "$rsa"
+chain=unknown
+if [ "${root_google:-0}" = 1 ]; then
+    chain=google
+elif [ "$keys" -ge 1 ]; then
+    chain=untrusted
+fi
+
+printf 'valid size=%s keys=%s certs=%s ec=%s rsa=%s chain=%s\n' "$size" "$keys" "$certs" "$ec" "$rsa" "$chain"
 [ "$rsa" -ge 1 ] || printf 'incomplete: no rsa\n'
+if [ "$chain" = untrusted ]; then
+    if [ "$structural" = 0 ]; then
+        printf 'chain warning: the root is not a Google or OEM attestation root; Play will not raise this keybox to DEVICE\n' >&2
+    fi
+fi
 exit 0

@@ -200,6 +200,12 @@ attempt() {
         self_heal
         return 0
     fi
+    if [ "$(conf_get keybox_require_trusted)" = 1 ] && ! printf '%s' "$out" | grep -q 'chain=google'; then
+        rm -f "$tmp"
+        state_set last_result refused-untrusted-chain
+        log_line "keybox fetch refused: $out (no Google or OEM root, so Play would not raise DEVICE)"
+        return 0
+    fi
     cur=$(sha256sum "$KEYBOX" 2>/dev/null | cut -d' ' -f1)
     if [ -n "$cur" ] && [ "$cur" = "$got" ]; then
         rm -f "$tmp"
