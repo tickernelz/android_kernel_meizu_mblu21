@@ -218,7 +218,16 @@ SELinux stays **Enforcing** with the LKM path — there is no reason to set perm
 
 Root alone is detected by most banking apps. SUSFS hides the interesting parts: mount points, `/proc` entries, module list, kernel version, and the root driver's own symbols.
 
-Install the guard module; it is included in the same release as `susfs_guard_lkm-module.zip`:
+**Check first whether the kernel already carries SUSFS:**
+
+```sh
+adb shell su -c '/data/adb/ksud susfs implementation'
+```
+
+- `builtin`: SUSFS is in the kernel. Do not install the guard module. Of the `boot-<variant>.img` kernels only `boot-sukisu-ultra.img` and `boot-sukisu-ultra-kpm.img` are built this way (`CONFIG_KSU_SUSFS=y` in their `config-report.txt`); measured on this phone on 2026-11-06 with both, after re-signing: `builtin`, and no `susfs_guard_lkm` in `/proc/modules` (README [Status](../README.md#status)). If the module is installed on such a kernel, remove it with `ksud module uninstall susfs_guard_lkm` and reboot; that removal has not been verified after a reboot yet.
+- Anything else (the LKM path of §3-§5, and `boot-kernelsu-next.img`, whose config has `CONFIG_KSU=y` without `CONFIG_KSU_SUSFS`): install the guard module below. `boot-bakasu.img` is built without the SUSFS patch, and whether the guard module works with its driver is not measured ([release-notes/bakasu.md](../release-notes/bakasu.md)).
+
+The guard module is included in the same release as `susfs_guard_lkm-module.zip`:
 
 ```sh
 adb push susfs_guard_lkm-module.zip /data/local/tmp/
@@ -275,7 +284,7 @@ One host command proves root, the manager, SELinux and SUSFS:
 adb shell su -c 'id; /data/adb/ksud -V; getenforce; /data/adb/ksud susfs implementation'
 ```
 
-Expected: `uid=0(root) ... context=u:r:ksu:s0`, a `ksud` version, `Enforcing`, and `lkm` once the guard module from §6 is installed.
+Expected: `uid=0(root) ... context=u:r:ksu:s0`, a `ksud` version, `Enforcing`, and `lkm` once the guard module from §6 is installed (`builtin` on `boot-sukisu-ultra` and `boot-sukisu-ultra-kpm`, without the module).
 
 Compare the untouched partitions against the stock hashes; only `init_boot_a` may differ:
 
@@ -302,7 +311,7 @@ Stock values measured on the reference phone: `boot_a` `3a78e1394a5c3c52252384c7
 | stuck on the Meizu logo | the image written to `init_boot_a` is bad, or `vbmeta`/`vendor_boot` was replaced | enter download mode, write stock `init_boot_a`, and stock `vbmeta_a`/`vendor_boot_a` if you changed them |
 | boots, but no `su` | manager app not installed, or root not granted yet | install the manager (§5), open it, grant |
 | `ksud` not found | the LKM image was never written, or the patched image was overwritten by a stock restore | reflash the patched `init_boot_a` |
-| SUSFS not loaded after reboot | module missing or `ksud insmod` failed | `cat /data/adb/ksu/log/susfs_guard.log`, reinstall §6 |
+| SUSFS not loaded after reboot | module missing or `ksud insmod` failed | run `ksud susfs implementation` first: `builtin` needs no module; otherwise `cat /data/adb/ksu/log/susfs_guard.log`, reinstall §6 |
 | banking app still refuses | manager visible or Play Integrity failing | §6 notes: not covered here |
 
 A phone that will not boot is not a brick: the BootROM is reachable on every power-up, so download mode plus a stock image always brings it back.
