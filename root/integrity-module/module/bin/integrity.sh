@@ -112,12 +112,16 @@ doctor() {
     fi
 
     printf '== hiding\n'
-    if command -v ksud >/dev/null 2>&1 && [ "$(ksud susfs status 2>/dev/null)" = true ]; then
-        printf '[ok] SUSFS is active\n'
-    else
-        printf '[fail] SUSFS is not active\n'
-        rc=1
-    fi
+    susfs_version=$(command -v ksud >/dev/null 2>&1 && ksud susfs version 2>/dev/null)
+    case "$susfs_version" in
+        v*)
+            printf '[ok] SUSFS %s is active\n' "$susfs_version"
+            ;;
+        *)
+            printf '[fail] SUSFS is not active\n'
+            rc=1
+            ;;
+    esac
     if [ -e /system/bin/su ]; then
         printf '[fail] /system/bin/su is visible in the default namespace\n'
         rc=1

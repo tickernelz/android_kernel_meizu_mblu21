@@ -405,6 +405,20 @@ INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/boot-verdict.sh" >/dev/null 2>&
 grep -q 'input tap 360 594' "$T/input.trace" 2>/dev/null && ok "boot-verdict taps once the checker has focus" || no "boot-verdict taps once the checker has focus"
 grep -q '"device":"MEETS_BASIC_INTEGRITY"' "$T/data/adb/tricky_store/verdicts.jsonl" 2>/dev/null && ok "boot-verdict records the parsed verdict when focused" || no "boot-verdict records the parsed verdict when focused"
 
+susfs_doctor() {
+    fresh
+    printf '#!/bin/sh\n%s\n' "$1" > "$T/bin/ksud"
+    for stub in getprop logcat dumpsys stat; do printf '#!/bin/sh\nexit 0\n' > "$T/bin/$stub"; done
+    chmod +x "$T/bin/"*
+    INTEGRITY_ROOT=$T PATH=$T/bin:$PATH sh "$mod/bin/integrity.sh" doctor 2>/dev/null | grep 'SUSFS'
+}
+next_ksud='[ "$1 $2" = "susfs version" ] && { echo v2.3.0; exit 0; }; echo "error: unrecognized subcommand '"'"'$2'"'"'" >&2; exit 2'
+suki_ksud='case "$2" in status) echo true ;; version) echo v2.3.0 ;; esac'
+none_ksud='[ "$2" = version ] && echo Invalid; exit 0'
+[ "$(susfs_doctor "$next_ksud")" = '[ok] SUSFS v2.3.0 is active' ] && ok "doctor sees SUSFS on KernelSU-Next ksud without susfs status" || no "doctor sees SUSFS on KernelSU-Next ksud without susfs status"
+[ "$(susfs_doctor "$suki_ksud")" = '[ok] SUSFS v2.3.0 is active' ] && ok "doctor sees SUSFS on SukiSU-Ultra ksud" || no "doctor sees SUSFS on SukiSU-Ultra ksud"
+[ "$(susfs_doctor "$none_ksud")" = '[fail] SUSFS is not active' ] && ok "doctor fails when ksud reports no SUSFS version" || no "doctor fails when ksud reports no SUSFS version"
+
 printf '
 %s passed, %s failed
 ' "$pass" "$fail"
