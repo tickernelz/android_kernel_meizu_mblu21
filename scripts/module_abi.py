@@ -78,6 +78,33 @@ class Elf:
             name = self.data[start:self.data.index(b"\x00", start)].decode("ascii", "replace")
             yield name, value, shndx
 
+    def undefined(self):
+        symtab = self.sections[".symtab"]
+        entsize = symtab["entsize"] or 24
+        strtab = next(entry for entry in self.sections.values() if entry is not symtab and entry["type"] == 3 and entry["name"] == ".strtab")
+        out = {}
+        for index in range(symtab["size"] // entsize):
+            base = symtab["offset"] + index * entsize
+            name_off, info, _other, shndx, _value, _size = struct.unpack_from("<IBBHQQ", self.data, base)
+            if shndx != 0 or name_off == 0:
+                continue
+            start = strtab["offset"] + name_off
+            name = self.data[start:self.data.index(b"\x00", start)].decode("ascii", "replace")
+            out[name] = (info >> 4) == 2
+        return out
+
+    def modinfo(self):
+        section = self.sections.get(".modinfo")
+        if section is None:
+            return {}
+        raw = self.data[section["offset"]:section["offset"] + section["size"]]
+        info = {}
+        for item in raw.split(b"\x00"):
+            key, sep, value = item.decode("utf-8", "replace").partition("=")
+            if sep:
+                info.setdefault(key, value)
+        return info
+
     def exports(self):
         names = set()
         crcs = {}
@@ -240,6 +267,93 @@ def self_test(imports, module_exported, symvers):
     return ok
 
 
+def parse_kallsyms(path):
+    defined = set()
+    exported = set()
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) < 3 or len(parts[1]) != 1:
+                continue
+            name = parts[2]
+            if name.startswith("__ksymtab_"):
+                exported.add(name[len("__ksymtab_"):])
+            else:
+                defined.add(name)
+    return defined, exported
+
+
+def classify(undefined, defined, exported):
+    result = {"exported": [], "kallsyms_only": [], "missing": [], "weak_missing": []}
+    for name, weak in sorted(undefined.items()):
+        if name in exported:
+            result["exported"].append(name)
+        elif name in defined:
+            result["kallsyms_only"].append(name)
+        elif weak:
+            result["weak_missing"].append(name)
+        else:
+            result["missing"].append(name)
+    return result
+
+
+def check_vermagic(vermagic, release_prefix, flags):
+    release, _, rest = vermagic.partition(" ")
+    return release.startswith(release_prefix) and rest.split() == flags.split()
+
+
+def lkm_self_test(undefined, defined, exported):
+    rng = random.Random(4389)
+    present = sorted(name for name in undefined if name in defined or name in exported)
+    if len(present) < 10:
+        print("  self-test FAILED: too few resolvable imports to perturb")
+        return False
+    dropped = set(rng.sample(present, max(1, len(present) // 10)))
+    result = classify(undefined, defined - dropped, exported - dropped)
+    expected = sorted(name for name in dropped if not undefined[name])
+    got = sorted(set(result["missing"]) & dropped)
+    ok = got == expected and set(result["missing"]) == set(expected)
+    print(f"  self-test: removed {len(dropped)} imported symbols from the kernel table, checker reported {len(result['missing'])} missing (expected {len(expected)}) -> {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def cmd_lkm(args):
+    defined, exported = parse_kallsyms(args.kallsyms)
+    print(f"kernel symbols: {len(defined)} in kallsyms, {len(exported)} exported")
+    if len(defined) < 1000 or len(exported) < 1000:
+        print("kernel symbol table too small; extraction failed")
+        return 1
+    passed = True
+    for path in args.modules:
+        elf = Elf(path)
+        info = elf.modinfo()
+        vermagic = info.get("vermagic", "")
+        undefined = elf.undefined()
+        result = classify(undefined, defined, exported)
+        vermagic_ok = check_vermagic(vermagic, args.release_prefix, args.vermagic_flags)
+        print(f"== {os.path.basename(path)} (name={info.get('name', '?')})")
+        print(f"  vermagic: {vermagic} -> {'OK' if vermagic_ok else 'MISMATCH'}")
+        print(f"  imports: {len(undefined)}; exported by the kernel: {len(result['exported'])}; in kallsyms only: {len(result['kallsyms_only'])}; missing: {len(result['missing'])}; weak and absent: {len(result['weak_missing'])}")
+        if result["kallsyms_only"]:
+            print(f"  need a kallsyms-resolving loader (plain insmod fails on these): {' '.join(result['kallsyms_only'])}")
+        for name in result["missing"]:
+            print(f"  missing {name}")
+        for name in args.require:
+            if name in undefined:
+                state = "exported" if name in exported else "kallsyms only" if name in defined else "MISSING"
+                print(f"  required import {name}: {state}")
+        module_ok = vermagic_ok and not result["missing"]
+        if args.self_test:
+            module_ok = lkm_self_test(undefined, defined, exported) and module_ok
+        passed = passed and module_ok
+    for name in args.require:
+        state = "exported" if name in exported else "in kallsyms, not exported" if name in defined else "MISSING"
+        print(f"kernel {name}: {state}")
+        if name not in defined and name not in exported:
+            passed = False
+    return 0 if passed else 1
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -254,6 +368,14 @@ def main(argv):
     check.add_argument("--symvers", required=True)
     check.add_argument("--self-test", action="store_true")
     check.set_defaults(func=cmd_check)
+    lkm = sub.add_parser("lkm", help="check loadable root modules against a kernel symbol table in /proc/kallsyms format")
+    lkm.add_argument("--kallsyms", required=True)
+    lkm.add_argument("--modules", nargs="+", required=True)
+    lkm.add_argument("--release-prefix", default="5.15.")
+    lkm.add_argument("--vermagic-flags", default="SMP preempt mod_unload modversions aarch64")
+    lkm.add_argument("--require", nargs="*", default=[])
+    lkm.add_argument("--self-test", action="store_true")
+    lkm.set_defaults(func=cmd_lkm)
     args = parser.parse_args(argv)
     return args.func(args)
 

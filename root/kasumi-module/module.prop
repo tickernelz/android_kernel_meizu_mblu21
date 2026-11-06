@@ -1,0 +1,6 @@
+id=kasumi_lkm
+name=Kasumi LKM (mblu21)
+version=v0.1.340
+versionCode=340
+author=Zhafron
+description=Loads kasumi_lkm.ko (Rouyashiki/Kasumi 049d5e93) for SukiSU Ultra LKM mode on Meizu mBlu 21, without SUSFS. Log: /data/adb/ksu/log/kasumi.log

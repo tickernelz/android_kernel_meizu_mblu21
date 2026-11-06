@@ -91,10 +91,22 @@ def info(path):
 
 def main(argv):
     if not argv:
-        raise SystemExit("usage: bootimg.py pack|info ...")
+        raise SystemExit("usage: bootimg.py pack|info|kernel ...")
     command = argv[0]
     if command == "info":
         print(json.dumps([info(path) for path in argv[1:]], indent=2))
+        return 0
+    if command == "kernel":
+        if len(argv) != 3:
+            raise SystemExit("usage: bootimg.py kernel <boot.img> <output>")
+        with open(argv[1], "rb") as handle:
+            data = handle.read()
+        if data[:8] != MAGIC:
+            raise SystemExit(f"{argv[1]}: bad boot magic")
+        kernel_size, _ramdisk_size, _os_version, header_size = struct.unpack_from("<4I", data, 8)
+        offset = round_up(header_size, 4096)
+        with open(argv[2], "wb") as handle:
+            handle.write(data[offset:offset + kernel_size])
         return 0
     if command == "pack":
         parser = argparse.ArgumentParser()

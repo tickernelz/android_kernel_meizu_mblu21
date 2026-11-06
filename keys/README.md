@@ -1,3 +1,5 @@
 # keys
 
 `testkey_rsa4096.pem` is the **public AOSP test key** from [`external/avb/test/data/testkey_rsa4096.pem`](https://android.googlesource.com/platform/external/avb/+/refs/heads/main/test/data/testkey_rsa4096.pem), byte-identical (SHA-256 `6a224754880a57ab9cbd308267cd157d94cf05a1c8cb851aec4090e045d24121`). It is **not a release key**: anyone can sign with it, and it only gives `boot-<variant>.img` a well-formed AVB footer. The phone does not trust it; see [docs/AVB-POLICY.md](../docs/AVB-POLICY.md).
+
+`yukisu-anatdx.asc` is the public GPG key YukiSU signs its releases with, copied from [`manager/app/src/main/assets/ci-update-public-key.asc`](https://github.com/Rouyashiki/YukiSU/blob/67b05e42fe3bfae2d9d1ef26105cc62dce59aae5/manager/app/src/main/assets/ci-update-public-key.asc) (SHA-256 `22e1083000443abeb1ce030991c7083b5d73428b282171aeafb578696df5d0eb`, primary fingerprint `71B2B58C2A543472BE0DA0D8F580A2CEEF67DC98`). `root-modules.yml` verifies the YukiSU `.ko`, `ksud` and manager APK against it.
