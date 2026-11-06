@@ -108,8 +108,9 @@ rm -rf "$tmp"
 
 if [ "$structural" = 0 ]; then
     [ "$ec" -ge 1 ] || fail no-ecdsa
-    [ "$rsa" -ge 1 ] || fail no-rsa
+    [ "$rsa" -ge 1 ] || fail 'incomplete: no rsa'
 fi
 
 printf 'valid size=%s keys=%s certs=%s ec=%s rsa=%s\n' "$size" "$keys" "$certs" "$ec" "$rsa"
+[ "$rsa" -ge 1 ] || printf 'incomplete: no rsa\n'
 exit 0

@@ -38,14 +38,22 @@ for f in integrity.conf target.txt security_patch.txt; do
     fi
 done
 
+MIGRATED=$TS_DIR/.migrated-v1.2.0
+if [ ! -f "$MIGRATED" ] && [ "$(sed -n 's/^ts_daemon=//p' "$TS_DIR/integrity.conf" 2>/dev/null | tail -n 1)" = 0 ]; then
+    sed -i 's/^ts_daemon=.*/ts_daemon=1/' "$TS_DIR/integrity.conf"
+    ui_print "- ts_daemon was 0 from v1.1.0; turned the certificate provider back on"
+fi
+: > "$MIGRATED"
+chmod 644 "$MIGRATED" 2>/dev/null
+
 sh "$MODPATH/bin/targets.sh" merge || ui_print "- target list merge failed"
 INTEGRITY_BIN="$MODPATH/bin"
 . "$INTEGRITY_BIN/keybox.sh"
 keybox_apply_mode
 
 find "$MODPATH" -type f -name '*.sh' -exec chmod 755 {} + 2>/dev/null
-chmod 755 "$MODPATH/tricky/daemon" "$MODPATH/tricky/machikado.arm64" "$MODPATH/tricky/machikado.arm" "$MODPATH/tricky/machikado.x64" 2>/dev/null
-chmod 644 "$MODPATH/pif.prop" "$MODPATH/tricky/service.apk" "$MODPATH/classes.dex" 2>/dev/null
+chmod 755 "$MODPATH/daemon" "$MODPATH/machikado" "$MODPATH/mazoku" 2>/dev/null
+chmod 644 "$MODPATH/pif.prop" "$MODPATH/service.apk" "$MODPATH/libtricky_store.so" "$MODPATH/classes.dex" 2>/dev/null
 for f in integrity.conf target.txt security_patch.txt; do
     set_perm "$TS_DIR/$f" 0 0 644
 done

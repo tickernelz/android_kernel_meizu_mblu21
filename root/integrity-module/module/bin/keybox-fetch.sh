@@ -28,10 +28,30 @@ state_set() {
 interval_hours() {
     h=$(conf_get keybox_fetch_interval_h)
     case $h in
-        ''|*[!0-9]*) h=24 ;;
+        ''|*[!0-9]*) h=6 ;;
     esac
-    [ "$h" -ge 1 ] || h=24
+    [ "$h" -ge 1 ] || h=6
+    [ "$h" -le 168 ] || h=168
     printf '%s' "$h"
+}
+
+requests_per_day() {
+    h=$(interval_hours)
+    n=$((24 / h))
+    [ "$n" -ge 1 ] || n=1
+    printf '%s' "$n"
+}
+
+seconds_until_due() {
+    last=$(state_get last_attempt)
+    case $last in
+        ''|*[!0-9]*) printf '0'; return 0 ;;
+    esac
+    want=$(( $(interval_hours) * 3600 ))
+    now=$(date +%s)
+    left=$(( last + want - now ))
+    [ "$left" -gt 0 ] || left=0
+    printf '%s' "$left"
 }
 
 source_value() {
@@ -192,8 +212,17 @@ attempt() {
         cp -f "$KEYBOX" "$PREV"
         log_line 'keybox backed up to keybox.prev.xml'
     fi
-    mv "$tmp" "$KEYBOX"
-    chmod 600 "$KEYBOX" 2>/dev/null
+    if [ -f "$INTEGRITY_BIN/keybox.sh" ]; then
+        if ! ( . "$INTEGRITY_BIN/keybox.sh"; keybox_install "$tmp" "fetched from $src" ); then
+            rm -f "$tmp"
+            state_set last_result install-failed
+            return 0
+        fi
+    else
+        mv "$tmp" "$KEYBOX"
+        chmod 600 "$KEYBOX" 2>/dev/null
+    fi
+    rm -f "$tmp"
     printf 'source=%s\nts=%s\nsha256=%s\n' "$src" "$(date '+%Y-%m-%d %H:%M:%S')" "$got" > "$SRC_STAMP"
     chmod 600 "$SRC_STAMP" 2>/dev/null
     state_set last_result installed
@@ -220,7 +249,7 @@ status() {
     src=$(source_value)
     printf 'auto_keybox: %s\n' "$(conf_get auto_keybox)"
     printf 'source: %s\n' "${src:-none}"
-    printf 'interval: %s h\n' "$(interval_hours)"
+    printf 'interval: %s h, requests per day: %s\n' "$(interval_hours)" "$(requests_per_day)"
     printf 'last_attempt: %s\n' "$(state_get last_attempt)"
     printf 'last_result: %s\n' "$(state_get last_result)"
     printf 'last_ok: %s\n' "$(state_get last_ok)"
@@ -240,7 +269,11 @@ status() {
 loop() {
     while :; do
         run
-        sleep "$TICK"
+        left=$(seconds_until_due)
+        [ "$left" -gt 0 ] || left=$TICK
+        [ "$left" -le 3600 ] || left=3600
+        log_line "keybox fetch: next attempt in ${left}s (one request per $(interval_hours)h)"
+        sleep "$left"
     done
 }
 

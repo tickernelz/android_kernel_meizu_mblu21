@@ -42,24 +42,22 @@ doctor() {
         fi
     done
 
-    printf '== keystore daemon\n'
-    ts_wanted=$(conf_get ts_daemon)
-    if [ "$ts_wanted" != 1 ]; then
-        printf '[ok] the TrickyStore loop is off (ts_daemon=%s); the daemon cannot help while it does not inject\n' "${ts_wanted:-0}"
-    else
-        first=$(launch_count)
-        sleep 10
-        second=$(launch_count)
-        rate=$((second - first))
-        if [ "$rate" -gt 3 ]; then
-            printf '[fail] the daemon respawned %s times in 10 s, which burns CPU without injecting\n' "$rate"
-            rc=1
-        elif pgrep -f "$MOD_DIR/service.sh" >/dev/null 2>&1; then
-            printf '[ok] the loop is alive and respawned %s times in 10 s\n' "$rate"
+    printf '== keystore provider\n'
+    if [ -d "$INTEGRITY_ROOT/data/adb/modules/teesim" ] && [ ! -e "$INTEGRITY_ROOT/data/adb/modules/teesim/disable" ]; then
+        printf '[ok] TEESimulator is installed and enabled; it serves key attestation from inside keystore\n'
+        if [ -f "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml" ]; then
+            printf '[ok] teesim keybox is present sha256=%s\n' "$(sha256sum "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml" | cut -d' ' -f1)"
         else
-            printf '[fail] ts_daemon=1 but the loop is not running\n'
+            printf '[fail] teesim module is enabled but %s is missing\n' "$INTEGRITY_ROOT/data/adb/teesim/keybox.xml"
             rc=1
         fi
+    fi
+    if [ -f "$INTEGRITY_BIN/ts-daemon.sh" ]; then
+        provider_out=$(sh "$INTEGRITY_BIN/ts-daemon.sh" status 2>&1) || rc=1
+        printf '%s\n' "$provider_out"
+    else
+        printf '[fail] bin/ts-daemon.sh is missing, so nothing keeps the certificate provider alive\n'
+        rc=1
     fi
 
     printf '== zygisk\n'
@@ -77,10 +75,8 @@ doctor() {
     rest=${algs#* }
     rsa=${rest##* }
     if [ "$state" = present ] && [ "$rsa" -eq 0 ]; then
-        printf '[warn] the keybox has no rsa key, so Play falls back to the real TEE record; that is the
-'
-        printf '       expected state when the owner keybox is kept and BASIC is the goal
-'
+        printf '[fail] keybox is incomplete: no rsa, so the provider cannot serve the rsa attestation record\n'
+        rc=1
     fi
 
     printf '== security patch\n'
@@ -92,8 +88,16 @@ doctor() {
     fi
 
     printf '== target list\n'
+    for pkg in com.google.android.gms com.android.vending; do
+        if grep -qxF "$pkg" "$TARGETS_FILE" 2>/dev/null; then
+            printf '[ok] %s is in %s\n' "$pkg" "$TARGETS_FILE"
+        else
+            printf '[fail] %s is missing from %s\n' "$pkg" "$TARGETS_FILE"
+            rc=1
+        fi
+    done
     if tg_out=$(sh "$INTEGRITY_BIN/targets.sh" check 2>&1); then
-        printf '[ok] Play Services, Play Store and the checker are in scope\n'
+        printf '[ok] the required packages are in scope\n'
     else
         printf '%s\n' "$tg_out"
         rc=1
@@ -141,7 +145,9 @@ doctor() {
     last=$(logcat -d -v brief 2>/dev/null | grep -o 'MEETS_[A-Z_]*' | tail -n 1)
     printf '[info] last device verdict in logcat: %s\n' "${last:-none}"
     if [ -f "$TS_DIR/verdicts.jsonl" ]; then
-        printf '[info] last recorded boot: %s\n' "$(tail -n 1 "$TS_DIR/verdicts.jsonl")"
+        printf '[info] last raw verdict: %s\n' "$(tail -n 1 "$TS_DIR/verdicts.jsonl")"
+    else
+        printf '[info] no verdict recorded yet\n'
     fi
     return $rc
 }

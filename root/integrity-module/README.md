@@ -10,9 +10,10 @@ level and the keybox policy. It replaces the combined third-party drop-in that o
 |---|---|
 | `module/module.prop` | module identity: id `playintegrityfix`, version `v1.0.0` |
 | `module/customize.sh` | installer: moves the old `/data/adb/modules/tricky_store` aside, keeps the keybox already on the phone, seeds the config |
-| `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then start the Tricky Store daemon from the module root |
+| `module/post-fs-data.sh`, `module/service.sh` | source the unmodified upstream PIF scripts, then hand the certificate provider to `bin/ts-daemon.sh` |
+| `module/bin/ts-daemon.sh` | supervises the Tricky Store certificate provider: waits for `sys.boot_completed` and keystore, restarts it with a capped backoff, logs every start and exit, and reports the state to `doctor` |
 | `module/bin/integrity.sh` | `status`, `doctor`, `verdict`, `keybox`, `targets`, `sp` |
-| `module/bin/keybox.sh` | keybox completeness report and the install-mode switch |
+| `module/bin/keybox.sh` | keybox completeness report, the install-mode switch, timestamped backups under `backup/`, the `keybox.log` trail and the TEESimulator mirror |
 | `module/bin/keybox-fetch.sh` | scheduled fetch, validation gate, backup, rollback, one log line per attempt |
 | `module/bin/keybox-validate.sh` | keybox validator: XML shape, ecdsa+rsa, certificate chain linkage on the DER names |
 | `module/bin/boot-verdict.sh`, `module/bin/verdict-parse.sh` | measure the verdict 60 s after every boot and append one parsed line to `/data/adb/tricky_store/verdicts.jsonl`; it taps only when the checker has focus and records `skipped:<focus>` otherwise |
@@ -33,6 +34,39 @@ The Tricky Store payload keeps its upstream layout at the module root — `servi
 `app_process` with `-Djava.class.path=./service.apk`, so its working directory has to be the
 directory that holds the APK and the shared library. Only `post-fs-data.sh`, `service.sh`
 and `target.txt` collide with the PIF payload, and those are merged here.
+
+## Certificate provider
+
+The keybox is only useful when a process reads it and answers keystore attestation with it.
+Upstream Tricky Store splits that in two: `libtricky_store.so` hooks the keystore call, and
+`daemon` runs `app_process` with `service.apk` to build the certificate chain from
+`/data/adb/tricky_store/keybox.xml`. The native library carries no PEM or keybox code of its own
+(`strings libtricky_store.so` finds neither `/data/adb` nor `keybox`), so without the daemon
+there is no chain to serve. `v1.1.0` shipped `ts_daemon=0` and stopped the loop after five runs
+shorter than ten seconds, which left every boot without a provider.
+
+`bin/ts-daemon.sh` replaces that: `ts_daemon=1` by default, it waits for `sys.boot_completed`
+and for `keystore2`, starts `./daemon` from the module root, and restarts it with a backoff of
+5 s doubling to 60 s. It never gives up on its own, and it logs `started pid=`, `exited rc=` and
+`restarting in` lines to `/data/adb/tricky_store/integrity.log`.
+
+`doctor` prints the provider state: the supervisor pid, the daemon pid, whether
+`libtricky_store.so` is mapped into it, the number of launches in this boot, and the last start
+and exit lines. A TEESimulator module, when the owner installs one, is reported as the active
+provider instead, and `keybox_sync_teesim` mirrors the active keybox to
+`/data/adb/teesim/keybox.xml`.
+
+## Keybox contract
+
+`bin/keybox-validate.sh` is the only gate. `doctor`, the fetch loop and `keybox_install` all use
+it, and strict mode rejects an ecdsa-only file with `invalid incomplete: no rsa`; the diagnostic
+`--structural` mode still accepts the shape but prints `incomplete: no rsa` so the state is
+never silent. Play asks for an ecdsa and an rsa attestation record separately, so a keybox with
+one algorithm can never serve both.
+
+Every install writes to `/data/adb/tricky_store/keybox.log`, keeps the previous file under
+`/data/adb/tricky_store/backup/keybox-<timestamp>.xml`, and prints the sha256 of what it wrote.
+The file itself never leaves the phone and is never committed.
 
 ## Provenance
 
