@@ -6,6 +6,11 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - '.github/workflows/root-modules.yml'
+      - 'root/kasumi-module/**'
+      - 'keys/yukisu-anatdx.asc'
+      - 'scripts/build_kasumi.sh'
+      - 'scripts/kallsyms-requirements.txt'
   workflow_dispatch:
     inputs:
       release_tag:

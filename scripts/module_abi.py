@@ -10,6 +10,7 @@ import sys
 
 MODULE_NAME_LEN = 56
 SHN_ABS = 0xFFF1
+SHF_ALLOC = 0x2
 
 
 class Elf:
@@ -27,13 +28,14 @@ class Elf:
         raw = []
         for index in range(shnum):
             base = shoff + index * shentsize
-            name_off, sh_type, _flags, addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
+            name_off, sh_type, flags, addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
                 "<IIQQQQIIQQ", self.data, base
             )
             raw.append(
                 {
                     "name_off": name_off,
                     "type": sh_type,
+                    "flags": flags,
                     "addr": addr,
                     "offset": offset,
                     "size": size,
@@ -104,6 +106,10 @@ class Elf:
             if sep:
                 info.setdefault(key, value)
         return info
+
+    def has_modversions(self):
+        section = self.sections.get("__versions")
+        return section is not None and bool(section["flags"] & SHF_ALLOC)
 
     def exports(self):
         names = set()
@@ -297,9 +303,13 @@ def classify(undefined, defined, exported):
     return result
 
 
-def check_vermagic(vermagic, release_prefix, flags):
+def check_vermagic(vermagic, modversions, kernel_release, release_prefix, flags):
     release, _, rest = vermagic.partition(" ")
-    return release.startswith(release_prefix) and rest.split() == flags.split()
+    if rest.split() != flags.split():
+        return False
+    if modversions:
+        return release.startswith(release_prefix)
+    return release == kernel_release
 
 
 def lkm_self_test(undefined, defined, exported):
@@ -330,9 +340,11 @@ def cmd_lkm(args):
         vermagic = info.get("vermagic", "")
         undefined = elf.undefined()
         result = classify(undefined, defined, exported)
-        vermagic_ok = check_vermagic(vermagic, args.release_prefix, args.vermagic_flags)
+        modversions = elf.has_modversions()
+        vermagic_ok = check_vermagic(vermagic, modversions, args.kernel_release, args.release_prefix, args.vermagic_flags)
         print(f"== {os.path.basename(path)} (name={info.get('name', '?')})")
-        print(f"  vermagic: {vermagic} -> {'OK' if vermagic_ok else 'MISMATCH'}")
+        rule = f"release prefix {args.release_prefix} (allocated __versions section)" if modversions else f"full release {args.kernel_release} (no allocated __versions section)"
+        print(f"  vermagic: {vermagic} -> {'OK' if vermagic_ok else 'MISMATCH'}; compared: flags and {rule}")
         print(f"  imports: {len(undefined)}; exported by the kernel: {len(result['exported'])}; in kallsyms only: {len(result['kallsyms_only'])}; missing: {len(result['missing'])}; weak and absent: {len(result['weak_missing'])}")
         if result["kallsyms_only"]:
             print(f"  need a kallsyms-resolving loader (plain insmod fails on these): {' '.join(result['kallsyms_only'])}")
@@ -372,6 +384,7 @@ def main(argv):
     lkm.add_argument("--kallsyms", required=True)
     lkm.add_argument("--modules", nargs="+", required=True)
     lkm.add_argument("--release-prefix", default="5.15.")
+    lkm.add_argument("--kernel-release", required=True)
     lkm.add_argument("--vermagic-flags", default="SMP preempt mod_unload modversions aarch64")
     lkm.add_argument("--require", nargs="*", default=[])
     lkm.add_argument("--self-test", action="store_true")

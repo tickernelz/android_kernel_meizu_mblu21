@@ -38,7 +38,7 @@ Kasumi publishes no binaries, so CI builds it. The build is reproducible: three 
 
 `scripts/module_abi.py lkm` compares each module with the **stock** kernel it will be loaded into: `boot_a.bin` from the stock firmware release (sha256 `3a78e139…`), kernel extracted with `scripts/bootimg.py kernel`, symbol table recovered with `kallsyms-finder` (`vmlinux-to-elf` 1.4.0, hash-pinned in `scripts/kallsyms-requirements.txt`).
 
-- **vermagic**: the module must be built for `5.15.*` with exactly the stock kernel's flags (`SMP preempt mod_unload modversions aarch64`, read from the stock image). All modules here say `5.15.202-android13-5.15.202_r00-dirty`; with `CONFIG_MODVERSIONS` the release part is not compared, and their `__versions` sections are empty, so no CRC is checked at load time.
+- **vermagic**: the flags must equal the stock kernel's (`SMP preempt mod_unload modversions aarch64`, read from the stock image). The kernel skips the release part only when the module has an allocated `__versions` section, so the checker accepts any `5.15.*` release only in that case and otherwise requires the stock release exactly. All modules here say `5.15.202-android13-5.15.202_r00-dirty` and carry an allocated but empty `__versions` section, so the release is skipped and no CRC is checked at load time.
 - **imports**: every undefined symbol is classified as exported by the kernel (`__ksymtab_` present), present in kallsyms only, or missing. Any missing symbol fails the job. "Kallsyms only" passes but is listed: plain `insmod` cannot resolve those, so the module needs a loader that resolves them from kallsyms (`ksud insmod`, KernelSU's own loader for `kernelsu.ko`, YukiZygisk's `viola`).
 - **`is_subdir`**: always reported for the kernel and for every module that imports it.
 - **IKCONFIG**: the stock kernel's embedded config must not set `CONFIG_KSU_SUSFS`, `CONFIG_NOMOUNT` or `CONFIG_HYBRIDMOUNT`, which would make Kasumi (standalone or inside YukiSU) refuse to start.
@@ -71,8 +71,8 @@ Measured on the stock kernel (149,066 kallsyms entries, 8,151 exports):
 Same flow as [ROOT.md](ROOT.md) Path B: the manager app patches `init_boot` on the phone, then the patched image is written with `spd_dump`. None of these variants has a host-side patcher here (`ksud-aarch64-linux-android` runs on Android only).
 
 - `yukisu`: install the YukiSU APK, let it patch the stock `init_boot_a.bin` using `android13-5.15_kernelsu.ko` from this release, flash, reboot.
-- `kasumi`: root with the `sukisu-ultra` LKM path, make sure `susfs_guard_lkm` is not installed, then `ksud module install kasumi_lkm-module.zip`. The module loads `kasumi_lkm.ko` in `post-fs-data` with `/data/adb/ksud insmod` and logs to `/data/adb/ksu/log/kasumi.log`; it skips the load and logs why when a conflicting module is present.
-- `yukizygisk`: on a KernelSU-family root with no other Zygisk (on `yukisu`, switch off the built-in YukiZygisk first), install the zip from the manager. Do the first load by hand, not at boot: see the test plan.
+- `kasumi`: root with the `sukisu-ultra` LKM path and make sure `susfs_guard_lkm` is not installed. Load `kasumi_lkm.ko` by hand first and time it (test plan below); only then `ksud module install kasumi_lkm-module.zip`. The module loads `kasumi_lkm.ko` in `post-fs-data` with `/data/adb/ksud insmod` and logs to `/data/adb/ksu/log/kasumi.log`; it skips the load and logs why when a conflicting module is present.
+- `yukizygisk`: on a KernelSU-family root with no other Zygisk (on `yukisu`, switch off the built-in YukiZygisk first), load `yukizygisk.ko` by hand first and time it (test plan below). Only after that install the zip from the manager: installing it schedules `post-fs-data.sh`, which loads the module during the next boot, the path that panicked on 2026-11-06.
 
 ## Phone test plan and recovery
 
@@ -86,6 +86,6 @@ Before flashing anything:
 
 Measurements to take:
 
-- `yukizygisk`: after a normal boot with root, load the LKM by hand and time it (`yzctl`/WebUI status, `dmesg | grep -i yukizygisk`), and confirm there is no `Unknown symbol`. The load must stay well below the 2000 ms `native_hang_monitor` limit before the module is allowed to run at boot. Then 3 boots in a row without a panic (`/sys/fs/pstore` empty after each).
-- `kasumi`: `rc=0 present=yes` at the end of `kasumi.log` for each of 3 boots, no panic.
+- `yukizygisk`, before the zip is installed: after a normal boot with root, `adb push yukizygisk.ko /data/local/tmp/` (from the release), then `su -c 'dmesg -c >/dev/null; time /data/adb/ksud insmod /data/local/tmp/yukizygisk.ko; dmesg | grep -i yukizygisk'`. `ksud insmod` resolves `is_subdir` from kallsyms. There must be no `Unknown symbol`, and the load must stay well below the 2000 ms `native_hang_monitor` limit. Then reboot (the module is not persistent), install the zip, and boot 3 times in a row without a panic (`/sys/fs/pstore` empty after each). If a boot with the zip installed hangs, recovery path A applies.
+- `kasumi`, before the zip is installed: the same hand load and timing with `kasumi_lkm.ko` (`ksud insmod` resolves its 6 non-exported imports); `kasumi_lkm.ko` loaded from `post-fs-data` runs under the same 2000 ms limit. Then install the zip and check `rc=0 present=yes` at the end of `kasumi.log` for each of 3 boots, no panic.
 - `yukisu`: root works (`su -c id`), built-in Kasumi and YukiZygisk state as shown by the manager, 3 boots without a panic.
