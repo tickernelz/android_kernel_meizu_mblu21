@@ -307,29 +307,28 @@ Stock values measured on the reference phone: `boot_a` `3a78e1394a5c3c52252384c7
 
 A phone that will not boot is not a brick: the BootROM is reachable on every power-up, so download mode plus a stock image always brings it back.
 
-## 10. PixelOS 17 ROM: SukiSU-Ultra v4.3.0-r2
+## 10. PixelOS 17 ROM: SukiSU-Ultra v4.3.0-r2 or KernelSU-Next v3.4.2
 
-Sections 1-9 are for the stock Meizu ROM and its `v4.3.0` images. On the unofficial PixelOS 17 ROM ([pixelos_build_mblu21](https://github.com/tickernelz/pixelos_build_mblu21)) root uses the same LKM path with SukiSU-Ultra `v4.3.0-r2` built from source, release `mblu21-pixelos-root-20261105`. That ROM ships the stock Meizu boot image, so the kernel is unchanged and has no KernelSU built in.
+Sections 1-9 are for the stock Meizu ROM and its `v4.3.0` images. On the unofficial PixelOS 17 ROM ([pixelos_build_mblu21](https://github.com/tickernelz/pixelos_build_mblu21)) root uses the same LKM path, with both root implementations built from their release tags. That ROM ships the stock Meizu boot image, so the kernel is unchanged and has no KernelSU built in. Pick one implementation.
 
-| | Stock ROM (§3) | PixelOS 17 build `20261105-1507` |
+| | Stock ROM (§3) | PixelOS 17 build `20261105-1807` (release `mblu21-pixelos-root-20261106`) |
 |---|---|---|
-| SukiSU-Ultra | `v4.3.0` | `v4.3.0-r2` (`645ef986`) |
-| Image | `init_boot-sukisu-ultra-lkm.img` | `init_boot-PixelOS_mblu21-17.0-20261105-1507-sukisu-v4.3.0-r2.img` (`da2cac6d…`) |
-| Manager | `SukiSU_v4.3.0_41100-release.apk` | `SukiSU_v4.3.0-r2_41150-release.apk` |
-| SUSFS guard | `susfs_guard_lkm` `v2.3.0` | same module, same bytes |
+| SukiSU-Ultra | `v4.3.0` | `v4.3.0-r2` (`645ef986`): `init_boot-PixelOS_mblu21-17.0-20261105-1807-sukisu-v4.3.0-r2.img` (`da2cac6d…`), `SukiSU_v4.3.0-r2_41150-release.apk` |
+| KernelSU-Next | `v3.4.2` | `v3.4.2` (`4c706b59`): `init_boot-PixelOS_mblu21-17.0-20261105-1807-kernelsu-next-v3.4.2.img` (`85da3c7d…`), `KernelSU_Next_v3.4.2_33355-release.apk` |
+| SUSFS guard | `susfs_guard_lkm` `v2.3.0` | same `.ko` bytes (`024aa0de…`): the module zip for SukiSU-Ultra, built into `ksud` for KernelSU-Next |
 
-A patched `init_boot` fits one ROM build only. For another PixelOS build, patch that build's `init_boot.img` with `patch-init-boot.sh` from the release; installing a ROM update without a repatched `init_boot` drops root.
+A patched `init_boot` fits every ROM build whose stock `init_boot.img` has the same sha256. Builds `20261105-1507` and `20261105-1807` both have `738c8151…`, so the 1507 SukiSU image in `mblu21-pixelos-root-20261105` is the same file as the 1807 one. For a build with a different stock `init_boot`, patch it with `patch-init-boot.sh` from the release; installing such a ROM update without a repatched `init_boot` drops root.
 
-Install from a phone that is already rooted (commands in the release notes), or write the image to the active slot (`init_boot_a` or `init_boot_b`, see `getprop ro.boot.slot_suffix`) with `spd_dump` as in §4. Then check:
+Install from a phone that is already rooted (commands in the release notes), or write the image to the active slot (`init_boot_a` or `init_boot_b`, see `getprop ro.boot.slot_suffix`) with `spd_dump` as in §4. Before any reboot, run `adb shell su -c 'chmod 600 /data/property/persistent_properties'`: `ksud`'s `resetprop -p`, called by PlayIntegrityFix on every boot, leaves that file `0666`, and `init` then drops every persisted property on the next boot (adb came up only after 194 s when this happened). Then check:
 
 ```sh
-adb shell su -c '/data/adb/ksud -V'              # ksud 4.3.0-r2 (uapi: 6)
+adb shell su -c '/data/adb/ksud -V'              # ksud 4.3.0-r2 (uapi: 6) | ksud 3.4.2 (uapi: 5)
 adb shell su -c 'grep ^kernelsu /proc/modules'   # kernelsu ... Live
-adb shell su -c '/data/adb/ksud susfs status'    # true
+adb shell su -c '/data/adb/ksud susfs version'   # v2.3.0
 adb shell su -c 'getenforce'                     # Enforcing
 ```
 
-Those outputs were measured on the phone on 2026-11-05 after installing from a rooted phone with `dd`. The `spd_dump` write of this image and a first install on an unrooted PixelOS phone were not tested.
+Those outputs were measured on the phone on 2026-11-06, one variant at a time, after installing from a rooted phone with `dd` (raw output: `verify-on-phone-20261106.txt` in the release). `sys.boot_completed` came 28.5 s after kernel start with SukiSU-Ultra and about 30.5 s with KernelSU-Next, one boot each. The `spd_dump` write of these images and a first install on an unrooted PixelOS phone were not tested.
 
 ---
 

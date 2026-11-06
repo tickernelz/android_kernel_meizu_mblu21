@@ -29,7 +29,7 @@ Kernel sources and root images for the Meizu mBlu 21: a GKI `boot` image with a 
 
 The **LKM path is tested on hardware**: both `init_boot` images boot and give root on a real mBlu 21, and the SUSFS guard module survives a reboot (details in [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md)).
 
-The **LKM path on the unofficial PixelOS 17 ROM** ([pixelos_build_mblu21](https://github.com/tickernelz/pixelos_build_mblu21), build `20261105-1507`) **is tested on hardware** with SukiSU-Ultra `v4.3.0-r2` built from source: `ksud 4.3.0-r2`, `kernelsu` loaded, SUSFS `lkm`/`v2.3.0`/`true`, `su` gives `u:r:ksu:s0`, SELinux Enforcing, data kept (release `mblu21-pixelos-root-20261105`). That ROM ships the stock Meizu boot image, so its kernel has no KernelSU built in. The r2 images have not been tried on the stock Meizu ROM.
+The **LKM path on the unofficial PixelOS 17 ROM** ([pixelos_build_mblu21](https://github.com/tickernelz/pixelos_build_mblu21), builds `20261105-1507` and `20261105-1807`) **is tested on hardware** with SukiSU-Ultra `v4.3.0-r2` and KernelSU-Next `v3.4.2`, both built from their release tags: `ksud` reports its version, `kernelsu` loaded, SUSFS `v2.3.0`, `su` gives `u:r:ksu:s0`, SELinux Enforcing, data kept (releases `mblu21-pixelos-root-20261105` and `mblu21-pixelos-root-20261106`). That ROM ships the stock Meizu boot image, so its kernel has no KernelSU built in. These images have not been tried on the stock Meizu ROM.
 
 The **kernel path (`boot-<variant>.img`) does not boot on this phone.** On 2026-11-03 the SukiSU-Ultra image (KPM + SUSFS, `61d6e77d…`) was written to `boot_a` with everything else stock: the phone stopped at a striped Meizu logo, never enumerated on USB and left nothing in pstore, and booted again only after `boot_a` was restored from download mode. `vbmeta_a` chains `boot` to a Meizu key, so the bootloader most likely refuses the foreign signature. The images stay as CI pre-releases for other units; use the LKM path here.
 
@@ -95,12 +95,13 @@ What this does **not** prove: that the kernel boots, that the bootloader accepts
 
 ## Releases
 
-Five kinds of release:
+Six kinds of release:
 
 | Release | Contents |
 |---|---|
 | `mblu21-root-20261102` | **Tested on hardware.** `init_boot-sukisu-ultra-lkm.img` and `init_boot-kernelsu-next-lkm.img` (both boot, both give root), the SUSFS guard module (`susfs_guard_lkm.ko` plus `susfs_guard_lkm-module.zip`), both manager APKs (SukiSU-Ultra and KernelSU-Next), the patch logs, and `SHA256SUMS` |
-| `mblu21-pixelos-root-20261105` | **Tested on hardware**, PixelOS 17 build `20261105-1507` only. `init_boot` patched with SukiSU-Ultra `v4.3.0-r2`, `ksud`/`kernelsu.ko`/`ksuinit` built from source, the SUSFS guard module (unchanged), the upstream r2 manager APK, the build log, `build-sukisu.sh` and `patch-init-boot.sh`, the on-phone check output, and `SHA256SUMS` |
+| `mblu21-pixelos-root-20261105` | **Tested on hardware**, PixelOS 17 build `20261105-1507` (the image also fits `20261105-1807`, which has the same stock `init_boot`). `init_boot` patched with SukiSU-Ultra `v4.3.0-r2`, `ksud`/`kernelsu.ko`/`ksuinit` built from source, the SUSFS guard module (unchanged), the upstream r2 manager APK, the build log, `build-sukisu.sh` and `patch-init-boot.sh`, the on-phone check output, and `SHA256SUMS` |
+| `mblu21-pixelos-root-20261106` | **Tested on hardware**, PixelOS 17 build `20261105-1807` (and every build with the same stock `init_boot`). Two `init_boot` images, SukiSU-Ultra `v4.3.0-r2` and KernelSU-Next `v3.4.2`, with `ksud`/`kernelsu.ko`/`ksuinit` built from the release tags (both `kernelsu.ko` and the KernelSU-Next SUSFS guard byte-identical to upstream), the SUSFS guard module, both upstream manager APKs, `build-sukisu.sh`, `build-ksunext.sh`, `patch-init-boot.sh`, both build logs, the on-phone check output, and `SHA256SUMS` |
 | `mblu21-susfs-lkm-20261102` | **Tested on hardware.** The SUSFS guard KernelSU module alone (`susfs_guard_lkm.zip`, same bytes as `susfs_guard_lkm-module.zip` above) for SukiSU-Ultra in LKM mode, plus `SHA256SUMS` |
 | `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path does not boot on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 | `yukisu|kasumi|yukizygisk-<tag>-untested` (CI pre-release) | Built by `root-modules.yml`, **not tried on the phone**: the pinned upstream modules (YukiSU LKM, APK and `ksud` with signatures; `kasumi_lkm.ko` built from source plus its loader zip; the YukiZygisk zip), `module-abi-<variant>.txt`, `SHA256SUMS-<variant>`. See [docs/ROOT-MODULES.md](docs/ROOT-MODULES.md) |
