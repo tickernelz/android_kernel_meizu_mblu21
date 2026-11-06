@@ -232,7 +232,7 @@ After the reboot:
 adb shell su -c '/data/adb/ksud susfs implementation'   # lkm
 adb shell su -c '/data/adb/ksud susfs version'          # v2.3.0
 adb shell su -c '/data/adb/ksud susfs variant'          # GKI
-adb shell su -c '/data/adb/ksud susfs status'           # true
+adb shell su -c '/data/adb/ksud susfs status'           # true (SukiSU-Ultra only; KernelSU-Next has no status subcommand)
 adb shell su -c 'cat /data/adb/ksu/log/susfs_guard.log'
 ```
 
@@ -317,9 +317,9 @@ Sections 1-9 are for the stock Meizu ROM and its `v4.3.0` images. On the unoffic
 | KernelSU-Next | `v3.4.2` | `v3.4.2` (`4c706b59`): `init_boot-PixelOS_mblu21-17.0-20261105-1807-kernelsu-next-v3.4.2.img` (`85da3c7d…`), `KernelSU_Next_v3.4.2_33355-release.apk` |
 | SUSFS guard | `susfs_guard_lkm` `v2.3.0` | same `.ko` bytes (`024aa0de…`): the module zip for SukiSU-Ultra, built into `ksud` for KernelSU-Next |
 
-A patched `init_boot` fits every ROM build whose stock `init_boot.img` has the same sha256. Builds `20261105-1507` and `20261105-1807` both have `738c8151…`, so the 1507 SukiSU image in `mblu21-pixelos-root-20261105` is the same file as the 1807 one. For a build with a different stock `init_boot`, patch it with `patch-init-boot.sh` from the release; installing such a ROM update without a repatched `init_boot` drops root.
+A patched `init_boot` fits every ROM build whose stock `init_boot.img` has the same sha256. Builds `20261105-1507` and `20261105-1807` both have `738c8151…`, so the 1507 SukiSU image in `mblu21-pixelos-root-20261105` is the same file as the 1807 one. On the phone build 1807 shows as `PixelOS_mblu21-17.0-20261105-1800` (`ro.build.date.utc=1793901647`). For a build with a different stock `init_boot`, patch it with `patch-init-boot.sh` from the release; installing such a ROM update without a repatched `init_boot` drops root.
 
-Install from a phone that is already rooted (commands in the release notes), or write the image to the active slot (`init_boot_a` or `init_boot_b`, see `getprop ro.boot.slot_suffix`) with `spd_dump` as in §4. Before any reboot, run `adb shell su -c 'chmod 600 /data/property/persistent_properties'`: `ksud`'s `resetprop -p`, called by PlayIntegrityFix on every boot, leaves that file `0666`, and `init` then drops every persisted property on the next boot (adb came up only after 194 s when this happened). Then check:
+Install from a phone that is already rooted (commands in the release notes), or write the image to the active slot (`init_boot_a` or `init_boot_b`, see `getprop ro.boot.slot_suffix`) with `spd_dump` as in §4. `ksud`'s `resetprop -p`, called by PlayIntegrityFix on every boot, leaves `/data/property/persistent_properties` at `0666`, and `init` then drops every persisted property on the next boot (adb came up only after 194 s when this happened). Running `adb shell su -c 'chmod 600 /data/property/persistent_properties'` before a reboot is expected to avoid it (not tested); what was tested is the repair afterwards, `chmod 600` and then `setprop` of any `persist.` property, after which `init` rewrites the file as `0600`. Then check:
 
 ```sh
 adb shell su -c '/data/adb/ksud -V'              # ksud 4.3.0-r2 (uapi: 6) | ksud 3.4.2 (uapi: 5)
@@ -328,7 +328,7 @@ adb shell su -c '/data/adb/ksud susfs version'   # v2.3.0
 adb shell su -c 'getenforce'                     # Enforcing
 ```
 
-Those outputs were measured on the phone on 2026-11-06, one variant at a time, after installing from a rooted phone with `dd` (raw output: `verify-on-phone-20261106.txt` in the release). `sys.boot_completed` came 28.5 s after kernel start with SukiSU-Ultra and about 30.5 s with KernelSU-Next, one boot each. The `spd_dump` write of these images and a first install on an unrooted PixelOS phone were not tested.
+Those outputs were measured on the phone on 2026-11-06, one variant at a time, after installing from a rooted phone with `dd` (raw output: `verify-on-phone-20261106.txt` in the release). `sys.boot_completed` came 28.5 s after kernel start with SukiSU-Ultra and about 30.5 s with KernelSU-Next, one boot each; the two numbers are not comparable, because the SukiSU-Ultra boot ran with its persisted properties dropped. The `spd_dump` write of these images, a first install on an unrooted PixelOS phone, and `chmod 600` before a reboot were not tested.
 
 ---
 
