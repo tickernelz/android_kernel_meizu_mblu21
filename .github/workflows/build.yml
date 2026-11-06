@@ -108,7 +108,7 @@ jobs:
       - name: Apply ${{ matrix.variant }} integration
         run: |
           scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" \
-            "$(printf '%s\n' CONFIG_KSU=y ${{ matrix.required_config }})" "${{ matrix.root_ref }}"
+            "$(printf '%s\n' CONFIG_KSU=y CONFIG_OVERLAY_FS=y CONFIG_TMPFS_XATTR=y ${{ matrix.required_config }})" "${{ matrix.root_ref }}"
 
       - name: Build kernel
         run: |
@@ -144,9 +144,9 @@ jobs:
           {
             echo "kernel release: $(grep -a -o -m1 'Linux version 5[^(]*' "$image")"
             echo "Module.symvers: $(basename "$symvers") ($(wc -l < "$symvers") exports)"
-            grep -E '^CONFIG_KSU|^CONFIG_KPM|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
+            grep -E '^CONFIG_KSU|^CONFIG_KPM|^CONFIG_OVERLAY_FS=|^CONFIG_TMPFS_XATTR|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
           } | tee config-report.txt
-          for line in CONFIG_KSU=y ${{ matrix.required_config }}; do
+          for line in CONFIG_KSU=y CONFIG_OVERLAY_FS=y CONFIG_TMPFS_XATTR=y ${{ matrix.required_config }}; do
             grep -qx "$line" "$config"
           done
 
