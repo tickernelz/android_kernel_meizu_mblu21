@@ -1,6 +1,6 @@
 # Root variants without SUSFS: YukiSU, Kasumi, YukiZygisk
 
-Three optional root variants built by [`root-modules.yml`](../.github/workflows/root-modules.yml). They are separate from the SUSFS variants of `build.yml` (`sukisu-ultra`, `kernelsu-next` with `susfs_guard_lkm`), which stay the default and are not changed. None of the three has been run on the phone yet.
+Three optional root variants built by [`root-modules.yml`](../.github/workflows/root-modules.yml). They are separate from the SUSFS variants of `build.yml` (`sukisu-ultra`, `kernelsu-next` with `susfs_guard_lkm`), which stay the default and are not changed. All three were run on the phone on 2026-11-06: `yukisu` loads and boots, `kasumi` and `yukizygisk` panic while loading because Unisoc's `native_hang_monitor` kills any module whose `init_module` has not returned after 2000 ms. Numbers in [Measured on the phone](#measured-on-the-phone-2026-11-06).
 
 All three use the LKM path: the stock `5.15.149` kernel stays in `boot`, and root comes from a loadable module. The phone only boots a Meizu-signed `boot` (see [AVB-POLICY.md](AVB-POLICY.md)), so a kernel with these drivers built in is not an option; YukiSU itself is LKM-only (`CONFIG_KSU=m`; its docs say built-in mode is not supported).
 
@@ -60,19 +60,21 @@ Measured on the stock kernel (149,066 kallsyms entries, 8,151 exports):
 
 [INFERENCE] The `Unknown symbol` line means YukiZygisk's loader (`bin/viola`, which resolves symbols from `/proc/kallsyms` and falls back to `init_module` when it cannot) handed the module to the kernel without relocating `is_subdir`. Why it fell back on that boot, and whether `susfs_guard_lkm` was involved, is not measured; the phone was reset before it could be checked. The hang monitor's 2000 ms limit applies to any module load during boot.
 
+Measured 2026-11-06: with `ksud insmod` (which resolves from kallsyms) there is no `Unknown symbol` line at all, and `yukizygisk.ko` still panics at 2000 ms inside `yz_host_root_detect`, which scans kernel memory for an APatch symbol table. The missing symbol was a symptom of the `viola` fallback, not the reason the load is slow; the 2000 ms limit is what makes both this module and `kasumi_lkm.ko` unusable on this phone.
+
 ## Feature differences against the SUSFS variants
 
 - `yukisu` and `kasumi` drop SUSFS (`susfs_guard_lkm`, `ksud susfs`). Path hiding comes from Kasumi instead, which is configured differently: YukiSU's manager has Kasumi hide-rule management; for the standalone `kasumi_lkm.ko` the reference controller is [Kagami](https://github.com/Rouyashiki/Kagami), which has no published release and is not built here, so on SukiSU-Ultra the module loads and enforces its conflict guard, but no hiding rules are configured until a controller sets them.
 - Size: YukiSU `kernelsu.ko` is 1,566,224 bytes (SukiSU-Ultra 666,288), because Kasumi and YukiZygisk are built in.
-- Boot time and load time are not measured yet (see below).
+- Boot time and load time are measured below; `kasumi` and `yukizygisk` never finish loading.
 
-## Install (after Zhafron allows a phone test)
+## Install
 
-Same flow as [ROOT.md](ROOT.md) Path B: the manager app patches `init_boot` on the phone, then the patched image is written with `spd_dump`. None of these variants has a host-side patcher here (`ksud-aarch64-linux-android` runs on Android only).
+Same flow as [ROOT.md](ROOT.md) Path B: the manager app patches `init_boot` on the phone. None of these variants has a host-side patcher here (`ksud-aarch64-linux-android` runs on Android only). On 2026-11-06 the patched image was written back with `dd` from a root shell and checked with a sha256 readback, because `adb reboot download` is not honoured on this phone: it comes back to Android with `ro.boot.bootreason=reboot,downinit`, so download mode and `spd_dump` still need Volume Up plus a replug.
 
-- `yukisu`: install the YukiSU APK, let it patch the stock `init_boot_a.bin` using `android13-5.15_kernelsu.ko` from this release, flash, reboot.
-- `kasumi`: root with the `sukisu-ultra` LKM path and make sure `susfs_guard_lkm` is not installed. Load `kasumi_lkm.ko` by hand first and time it (test plan below); only then `ksud module install kasumi_lkm-module.zip`. The module loads `kasumi_lkm.ko` in `post-fs-data` with `/data/adb/ksud insmod` and logs to `/data/adb/ksu/log/kasumi.log`; it skips the load and logs why when a conflicting module is present.
-- `yukizygisk`: on a KernelSU-family root with no other Zygisk (on `yukisu`, switch off the built-in YukiZygisk first), load `yukizygisk.ko` by hand first and time it (test plan below). Only after that install the zip from the manager: installing it schedules `post-fs-data.sh`, which loads the module during the next boot, the path that panicked on 2026-11-06.
+- `yukisu`: install the YukiSU APK, let it patch the stock `init_boot_a.bin` using `android13-5.15_kernelsu.ko` from this release, flash, reboot. **Loads and boots (measured below).**
+- `kasumi`: root with the `sukisu-ultra` LKM path and make sure `susfs_guard_lkm` is not installed. Load `kasumi_lkm.ko` by hand first and time it (measured below); only then `ksud module install kasumi_lkm-module.zip`. The module loads `kasumi_lkm.ko` in `post-fs-data` with `/data/adb/ksud insmod` and logs to `/data/adb/ksu/log/kasumi.log`; it skips the load and logs why when a conflicting module is present. **Cannot load: panics at 2000 ms, so the zip is not installed.**
+- `yukizygisk`: on a KernelSU-family root with no other Zygisk (on `yukisu`, switch off the built-in YukiZygisk first), load `yukizygisk.ko` by hand first and time it (measured below). Only after that install the zip from the manager: installing it schedules `post-fs-data.sh`, which loads the module during the next boot, the path that panicked on 2026-11-06. **Cannot load: panics at 2000 ms, so the zip is not installed.**
 
 ## Phone test plan and recovery
 
@@ -81,11 +83,29 @@ Lock `~/re/mblu21/.phone.lock` for the whole session.
 Before flashing anything:
 
 1. Have the stock `init_boot_a.bin` (`d07159a1…`) and `boot_a.bin` (`3a78e139…`) ready; `init_boot` is the only partition these variants change.
-2. Recovery path A, a module stops boot: KernelSU safe mode, pressing Volume Down repeatedly while the phone boots, starts with every module disabled; then uninstall the module from the manager. This is upstream KernelSU behaviour and has not been tried on this phone or in YukiSU. Volume Down inside the stock recovery resets the phone instead (AVB-POLICY.md), so do not use recovery for this.
-3. Recovery path B, always available: download mode (Volume Up + plug in) and `spd_dump … w init_boot_a init_boot_a.bin` with the stock image (README, "Back to stock"). This boots without root; the module directory under `/data/adb/modules` stays, so rooting again re-runs it until it is removed (safe mode, or a reset).
+2. Recovery path A, a module stops boot: KernelSU safe mode, pressing Volume Down repeatedly while the phone boots, starts with every module disabled; then uninstall the module from the manager. This is upstream KernelSU behaviour and has not been tried on this phone or in YukiSU. Volume Down inside the stock recovery resets the phone instead (AVB-POLICY.md), so do not use recovery for this. Not exercised on 2026-11-06: no test left a boot that needed it.
+3. Recovery path B, always available: download mode (Volume Up + plug in) and `spd_dump … w init_boot_a init_boot_a.bin` with the stock image (README, "Back to stock"). This boots without root; the module directory under `/data/adb/modules` stays, so rooting again re-runs it until it is removed (safe mode, or a reset). Not exercised on 2026-11-06 either; every write went through `dd` from a root shell with the phone booted.
 
-Measurements to take:
+The hand-load commands that produced the numbers below, run as root with the pinned module on `/data/local/tmp`:
 
-- `yukizygisk`, before the zip is installed: after a normal boot with root, `adb push yukizygisk.ko /data/local/tmp/` (from the release), then `su -c 'dmesg -c >/dev/null; time /data/adb/ksud insmod /data/local/tmp/yukizygisk.ko; dmesg | grep -i yukizygisk'`. `ksud insmod` resolves `is_subdir` from kallsyms. There must be no `Unknown symbol`, and the load must stay well below the 2000 ms `native_hang_monitor` limit. Then reboot (the module is not persistent), install the zip, and boot 3 times in a row without a panic (`/sys/fs/pstore` empty after each). If a boot with the zip installed hangs, recovery path A applies.
-- `kasumi`, before the zip is installed: the same hand load and timing with `kasumi_lkm.ko` (`ksud insmod` resolves its 6 non-exported imports); `kasumi_lkm.ko` loaded from `post-fs-data` runs under the same 2000 ms limit. Then install the zip and check `rc=0 present=yes` at the end of `kasumi.log` for each of 3 boots, no panic.
-- `yukisu`: root works (`su -c id`), built-in Kasumi and YukiZygisk state as shown by the manager, 3 boots without a panic.
+```sh
+/data/adb/ksud insmod /data/local/tmp/yukizygisk.ko
+/data/adb/ksud insmod /data/local/tmp/kasumi_lkm.ko
+```
+
+## Measured on the phone (2026-11-06)
+
+Phone: MEIZU mblu 21, `meizu/custom_mblu21/mblu21:17/CP2A.260605.016`, slot `_a`, stock `5.15.149` kernel, SELinux enforcing. Modules and boot images from CI run `42145280457` at `b4b23a4`.
+
+| Variant | Load window | Result | Boots |
+|---|---|---|---|
+| `yukisu` `kernelsu.ko` v1.8.1 | `ksuinit` starts loading at 0.379 s, last module init line at 1.450 s → **1,071 ms** | loads, `su -c id` returns uid 0 with `u:r:ksu:s0`, `kernelsu` live at 1,400,832 bytes | 3 boots, `sys.boot_completed` **45.0 / 45.3 / 45.2 s**, `/sys/fs/pstore` without a `dmesg-ramoops` record after each |
+| `kasumi_lkm.ko` 049d5e93 | `Kasumi: === INIT START` 587.421 s → panic 589.433 s → **2,010 ms**, did not return | **panics**, 2 of 2 attempts | zip not installed, no bootloop risk added |
+| `yukizygisk.ko` v0.3.0-10136 | `yukizygisk: standalone LKM initializing` 35.703 s → panic 37.726 s → **2,022 ms**, did not return | **panics** | zip not installed |
+
+Baseline for the boot numbers: the `sukisu-ultra` LKM root this phone runs with no modules, `sys.boot_completed` **44.2 s** (44.9 s and 44.4 s on the two reboots that ended the session).
+
+- `yukisu`: the manager patched `init_boot_a` on the phone with the pinned `android13-5.15_kernelsu.ko` into `kernelsu_patched_20261106_092124.img` (sha256 `3553e7e1…`); the write was a `dd` of that image plus a sha256 readback. The built-in YukiZygisk registers its feature handler and then disables itself on every boot: `KernelSU: yukizygisk: early native snapshot unavailable; disabled for this boot`. Built-in Kasumi registers handlers `kasumi` (106) and `kasumi_sucompat` (105).
+- `kasumi` and `yukizygisk` never get past `init_module`: Unisoc's `native_hang_monitor` panics the phone when a module load has not returned after 2000 ms, and both spend that budget scanning kernel memory for an APatch symbol table (`kasumi_lookup_callable_quiet` → `kasumi_bootstrap_init`; `yz_resolve_symbol_variant` → `yz_host_root_detect`). A `post-fs-data` load of either zip would bootloop the phone exactly as the 2026-11-06 install did, so neither zip was installed.
+- `ksud insmod` did resolve the non-exported imports, `is_subdir` included: neither panic has an `Unknown symbol` line. Relocation is not the slow part.
+- One trap after a panic: `/data` is `f2fs` with `fsync_mode=nobarrier`, and files written shortly before a panic came back with their data zeroed (same size, header `\0`). A `kasumi_lkm.ko` copy and a `ksud` binary were lost that way and made `ksud insmod` return `rc=0` without loading anything. After any panic, re-push and verify the sha256 before trusting a file on the phone.
