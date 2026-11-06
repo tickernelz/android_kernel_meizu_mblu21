@@ -45,6 +45,7 @@ env:
   BAKASU_APK_URL: https://github.com/Baka-SU/BakaSU/releases/download/v4.2.0-rc3/ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
   BAKASU_APK_SHA256: 25657bc449439687608fffa04b4b586de90fc405e3dc6217bd997fc71ba0a0a1
   RUST_TOOLCHAIN: nightly-2026-09-22
+  BAKASU_NDK_VERSION: 29.0.14206865
 
 jobs:
   kernel:
@@ -351,7 +352,9 @@ jobs:
         run: |
           set -euo pipefail
           src="$RUNNER_TEMP/bakasu"
-          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$BAKASU_NDK_VERSION"
+          test -f "$ANDROID_NDK_HOME/source.properties" || yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$BAKASU_NDK_VERSION" >/dev/null
+          grep -qx "Pkg.Revision = $BAKASU_NDK_VERSION" "$ANDROID_NDK_HOME/source.properties"
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rust-src --target aarch64-linux-android
           cargo install cargo-ndk --locked
           {
