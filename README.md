@@ -31,7 +31,9 @@ The **LKM path is tested on hardware**: both `init_boot` images boot and give ro
 
 The **LKM path on the unofficial PixelOS 17 ROM** ([pixelos_build_mblu21](https://github.com/tickernelz/pixelos_build_mblu21), builds `20261105-1507` and `20261105-1807`, the latter shown as `20261105-1800` on the phone) **is tested on hardware** with SukiSU-Ultra `v4.3.0-r2` and KernelSU-Next `v3.4.2`, both built from their release tags: `ksud` reports its version, `kernelsu` loaded, SUSFS `v2.3.0`, `su` gives `u:r:ksu:s0`, SELinux Enforcing, data kept (releases `mblu21-pixelos-root-20261105` and `mblu21-pixelos-root-20261106`). That ROM ships the stock Meizu boot image, so its kernel has no KernelSU built in. These images have not been tried on the stock Meizu ROM.
 
-The **kernel path (`boot-<variant>.img`) does not boot on this phone.** On 2026-11-03 the SukiSU-Ultra image (KPM + SUSFS, `61d6e77d…`) was written to `boot_a` with everything else stock: the phone stopped at a striped Meizu logo, never enumerated on USB and left nothing in pstore, and booted again only after `boot_a` was restored from download mode. `vbmeta_a` chains `boot` to a Meizu key, so the bootloader most likely refuses the foreign signature. The images stay as CI pre-releases for other units; use the LKM path here.
+The **KPM boot (`boot` = GKI kernel built here + KernelPatch, root still from the LKM `init_boot`) is tested on hardware** (2026-11-06, PixelOS 17 build `20261105-1807`): the kernel built from `be074b05` with the stock `gki_defconfig` (full LTO), patched by `scripts/patch_kpm.sh` and packed by `scripts/replace_boot_kernel.sh` (`c68132ad…`, signed RSA-2048 with our own key) boots in 48 s on two consecutive reboots, `uname -r` `5.15.149-maybe-dirty`, SELinux Enforcing, `su` gives `u:r:ksu:s0`, `ksud extension list` shows `[AVAILABLE] kpm`, `ksud kpm version` `3584 (19:40:23 Oct 26 2026)`, SUSFS `v2.3.0` active, and all 108 `vendor_dlkm` and 2 `system_dlkm` modules load (180 in `/proc/modules`, the same as the stock kernel). With the bootloader unlocked, a foreign signature on `boot` is logged and ignored ([docs/AVB-POLICY.md](docs/AVB-POLICY.md)).
+
+The **kernel path with the driver built in (`boot-<variant>.img`) is not tried on this phone.** The 2026-11-03 image from `feat/sukisu-kpm` (`61d6e77d…`) stopped at the logo because `patch_linux` 0.14.0 dropped the KernelPatch payload from it, not because of the signature or the built-in driver: the same SukiSU-Ultra + SUSFS kernel without that step reaches `/init` under QEMU. The `boot-<variant>.img` pre-releases from `main` never carried that step; they are still unmeasured on hardware.
 
 Three optional variants without SUSFS (`yukisu`, `kasumi`, `yukizygisk`), built by `root-modules.yml`, are **not tried on the phone yet**; the SUSFS variants stay the default. See [docs/ROOT-MODULES.md](docs/ROOT-MODULES.md).
 
@@ -40,7 +42,8 @@ Three optional variants without SUSFS (`yukisu`, `kasumi`, `yukizygisk`), built 
 | Path | What is flashed | Kernel changed | Root | SUSFS (root hiding) |
 |---|---|---|---|---|
 | LKM (**tested**) | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: yes, via the guard module. KernelSU-Next: yes, same guard module |
-| Kernel (does not boot on this phone) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
+| KPM boot (**tested**) | `boot` and the LKM `init_boot` | GKI kernel plus KernelPatch | LKM, as above | same guard module as the LKM path |
+| Kernel (not tried on this phone) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
 
 LKM path status per variant:
 
@@ -139,14 +142,29 @@ Then install the matching manager and open it once:
 | SukiSU-Ultra | `SukiSU_v4.3.0_41100-release.apk` - attached to `mblu21-root-20261102`, or from `SukiSU-Ultra/SukiSU-Ultra` release `v4.3.0` |
 | KernelSU-Next | `KernelSU_Next_v3.4.2_33355-release.apk` - attached to `mblu21-root-20261102`, or from `KernelSU-Next/KernelSU-Next` release `v3.4.2` |
 
-### Path A - kernel with the driver built in (does not boot on this phone)
+### KPM boot - KernelPatch in `boot`, root from the LKM `init_boot`
+
+Install Path B first; the KPM loader in `kernelsu.ko` talks to KernelPatch through `__arm64_sys_truncate`, so both pieces are needed. Build the kernel and pack it (see [Build](#build)), keep a copy of `boot_a`, then write it as root:
+
+```sh
+adb shell su -c 'dd if=/dev/block/by-name/boot_a of=/data/local/tmp/boot_a.stock.img'
+adb pull /data/local/tmp/boot_a.stock.img
+adb push boot-kpm.img /data/local/tmp/
+adb shell su -c 'dd if=/data/local/tmp/boot-kpm.img of=/dev/block/by-name/boot_a bs=1M conv=fsync'
+adb reboot
+adb shell su -c 'ksud extension list; ksud kpm version'
+```
+
+`[AVAILABLE] kpm` and a version line mean the loader answers. To undo, write `boot_a.stock.img` back the same way (or `boot_b`, which stays stock).
+
+### Path A - kernel with the driver built in (not tried on this phone)
 
 ```sh
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
     fdl fdl2-dl.bin 0x9efffe00 exec w boot_a boot-sukisu-ultra.img reset
 ```
 
-Expected to be rejected by the bootloader, because `vbmeta_a` chains `boot` to a Meizu key. Not measured; see [docs/HARDWARE-2026-11-02.md](docs/HARDWARE-2026-11-02.md).
+The bootloader accepts a foreign signature on `boot` while unlocked ([docs/AVB-POLICY.md](docs/AVB-POLICY.md)); whether this kernel boots is not measured.
 
 ### Root hiding (SUSFS)
 
@@ -203,6 +221,17 @@ cd "$HOME/gki" && tools/bazel run --config=fast //common:kernel_aarch64_dist -- 
 scripts/make_boot.sh "$HOME/dist/Image" boot-sukisu-ultra.img . 67108864
 python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "$HOME/dist/kernel_aarch64_Module.symvers" --self-test
 ```
+
+KPM boot image (the kernel is plain `gki_defconfig`, no root driver; `--config=fast` is left out so LTO stays full like the stock kernel):
+
+```sh
+scripts/sync_sources.sh "$HOME/gki" be074b05e5aff5eb16a848fb3aaab2f73d687cb6 8
+cd "$HOME/gki" && tools/bazel run //common:kernel_aarch64_dist -- --dist_dir="$HOME/dist" && cd -
+scripts/patch_kpm.sh "$HOME/dist/Image" Image-kpm
+scripts/replace_boot_kernel.sh boot_a.bin Image-kpm <your-avb-key.pem> boot-kpm.img
+```
+
+`patch_kpm.sh` runs `kptools-linux` with the pinned `kpimg` from `SukiSU_KernelPatch_patch` 0.14.0 and fails unless the output grew by the payload and `kptools` lists it as patched; the release's own `patch_linux` binary writes an image without the payload, which is what hung the phone on 2026-11-03. `replace_boot_kernel.sh` keeps the stock header, AVB salt and properties, and signs with SHA256_RSA2048 at rollback index location 1 (the `boot` chain slot in `vbmeta_a`). The build took 13 minutes at 4 CPUs and peaked at 24 GB of memory.
 
 `scripts/bootimg.py` is a self-contained boot header v3/v4 packer; packing the stock kernel with it reproduces the stock `boot` and `init_boot` images byte for byte, which is the check that keeps it honest.
 

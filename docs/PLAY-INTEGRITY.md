@@ -18,8 +18,8 @@ summarised by bayton.org on 2026-09-14) states the two labels this phone cannot 
   attestation is present at all.
 
 The bootloader of this unit cannot be locked again with its own key: `vbmeta_a` chains to the
-Meizu key `d46eb3be` and `vendor_boot` to `4fce36c7`, and the 2026-11-03 attempt stopped at the
-boot logo. The only way to produce a verifying "locked" claim would be an attestation chain signed
+Meizu key `d46eb3be` and `vendor_boot` to `4fce36c7`; images signed with our key boot only because
+the unlocked bootloader ignores the mismatch ([AVB-POLICY.md](AVB-POLICY.md)). The only way to produce a verifying "locked" claim would be an attestation chain signed
 by an unrevoked Google keybox, which is another device's private key material; no such keybox is
 carried by this project and none was fetched.
 
