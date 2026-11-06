@@ -33,7 +33,7 @@ The **LKM path on the unofficial PixelOS 17 ROM** ([pixelos_build_mblu21](https:
 
 The **KPM boot (`boot` = GKI kernel built here + KernelPatch, root still from the LKM `init_boot`) is tested on hardware** (2026-11-06, PixelOS 17 build `20261105-1807`): the kernel built from `be074b05` with the stock `gki_defconfig` (full LTO), patched by `scripts/patch_kpm.sh` and packed by `scripts/replace_boot_kernel.sh` (`c68132ad…`, signed RSA-2048 with our own key) boots in 48 s on two consecutive reboots, `uname -r` `5.15.149-maybe-dirty`, SELinux Enforcing, `su` gives `u:r:ksu:s0`, `ksud extension list` shows `[AVAILABLE] kpm`, `ksud kpm version` `3584 (19:40:23 Oct 26 2026)`, SUSFS `v2.3.0` active, and all 108 `vendor_dlkm` and 2 `system_dlkm` modules load (180 in `/proc/modules`, the same as the stock kernel). With the bootloader unlocked, a foreign signature on `boot` is logged and ignored ([docs/AVB-POLICY.md](docs/AVB-POLICY.md)).
 
-The **kernel path with the driver built in (`boot-<variant>.img`) is not tried on this phone.** The 2026-11-03 image from `feat/sukisu-kpm` (`61d6e77d…`) stopped at the logo because `patch_linux` 0.14.0 dropped the KernelPatch payload from it, not because of the signature or the built-in driver: the same SukiSU-Ultra + SUSFS kernel without that step reaches `/init` under QEMU. The `boot-<variant>.img` pre-releases from `main` never carried that step; they are still unmeasured on hardware.
+The **kernel path with the driver built in is tested on hardware for SukiSU-Ultra only** (2026-11-06, PixelOS 17 build `20261105-1807`): `Image` from the `sukisu-ultra-20261106-untested` pre-release (`boot-sukisu-ultra` and `boot-sukisu-ultra-kpm`), re-signed with our own RSA-2048 key by `scripts/replace_boot_kernel.sh` against the stock `boot_a`, with the stock PixelOS `init_boot` and no LKM, boots in 45.4 s (`boot-sukisu-ultra`) and 48.0/49.0 s (`boot-sukisu-ultra-kpm`), SELinux Enforcing, `su` gives `u:r:ksu:s0`, `ksud susfs` `true`/`v2.3.0`/`GKI`/`builtin`, 179 modules with no `kernelsu` or `susfs_guard_lkm`, and `[AVAILABLE] kpm` on the KPM image. The CI assets carry the public test key; the phone ran the same kernel re-signed. `boot-kernelsu-next.img` and `boot-bakasu.img` are still unmeasured on hardware. The 2026-11-03 image from `feat/sukisu-kpm` (`61d6e77d…`) stopped at the logo because `patch_linux` 0.14.0 dropped the KernelPatch payload from it, not because of the signature or the built-in driver.
 
 Three optional variants without SUSFS (`yukisu`, `kasumi`, `yukizygisk`), built by `root-modules.yml`, are **not tried on the phone yet**; the SUSFS variants stay the default. See [docs/ROOT-MODULES.md](docs/ROOT-MODULES.md).
 
@@ -43,7 +43,7 @@ Three optional variants without SUSFS (`yukisu`, `kasumi`, `yukizygisk`), built 
 |---|---|---|---|---|
 | LKM (**tested**) | `init_boot` | no | kernel module loaded by the patched ramdisk | SukiSU-Ultra: yes, via the guard module. KernelSU-Next: yes, same guard module |
 | KPM boot (**tested**) | `boot` and the LKM `init_boot` | GKI kernel plus KernelPatch | LKM, as above | same guard module as the LKM path |
-| Kernel (not tried on this phone) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch. KernelSU-Next: no kernel patch needed; SUSFS comes from its `susfs_guard_lkm.ko` |
+| Kernel (**tested** for SukiSU-Ultra; KernelSU-Next and BakaSU not tried) | `boot` | yes | driver built into the kernel | SukiSU-Ultra: yes, kernel-side SUSFS patch (`builtin`, no guard module). KernelSU-Next: no kernel patch; SUSFS comes from its `susfs_guard_lkm.ko`. BakaSU: none |
 
 LKM path status per variant:
 
@@ -106,7 +106,7 @@ Six kinds of release:
 | `mblu21-pixelos-root-20261105` | **Tested on hardware**, PixelOS 17 build `20261105-1507` (the image also fits `20261105-1807`, which has the same stock `init_boot`). `init_boot` patched with SukiSU-Ultra `v4.3.0-r2`, `ksud`/`kernelsu.ko`/`ksuinit` built from source, the SUSFS guard module (unchanged), the upstream r2 manager APK, the build log, `build-sukisu.sh` and `patch-init-boot.sh`, the on-phone check output, and `SHA256SUMS` |
 | `mblu21-pixelos-root-20261106` | **Tested on hardware**, PixelOS 17 build `20261105-1807` (`20261105-1800` on the phone; and every build with the same stock `init_boot`). Two `init_boot` images, SukiSU-Ultra `v4.3.0-r2` and KernelSU-Next `v3.4.2`, with `ksud`/`kernelsu.ko`/`ksuinit` built from the release tags (both `kernelsu.ko` and the KernelSU-Next SUSFS guard byte-identical to upstream), the SUSFS guard module, both upstream manager APKs, `build-sukisu.sh`, `build-ksunext.sh`, `patch-init-boot.sh`, both build logs, the on-phone check output, and `SHA256SUMS` |
 | `mblu21-susfs-lkm-20261102` | **Tested on hardware.** The SUSFS guard KernelSU module alone (`susfs_guard_lkm.zip`, same bytes as `susfs_guard_lkm-module.zip` above) for SukiSU-Ultra in LKM mode, plus `SHA256SUMS` |
-| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (the kernel path is not tried on this phone, see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
+| `<variant>-<date>` (CI pre-release) | One per root variant, built by `build.yml`: `boot-<variant>.img` (on the phone only the SukiSU-Ultra kernel was tried, re-signed with our key; see [Status](#status)), `init_boot-<variant>-lkm.img`, the ABI reports, `config-report.txt`, `lkm-<variant>.log` |
 | `yukisu|kasumi|yukizygisk-<tag>-untested` (CI pre-release) | Built by `root-modules.yml`, **not tried on the phone**: the pinned upstream modules (YukiSU LKM, APK and `ksud` with signatures; `kasumi_lkm.ko` built from source plus its loader zip; the YukiZygisk zip), `module-abi-<variant>.txt`, `SHA256SUMS-<variant>`. See [docs/ROOT-MODULES.md](docs/ROOT-MODULES.md) |
 
 ## Install
@@ -157,7 +157,7 @@ adb shell su -c 'ksud extension list; ksud kpm version'
 
 `[AVAILABLE] kpm` and a version line mean the loader answers. To undo, write `boot_a.stock.img` back the same way (or `boot_b`, which stays stock).
 
-### Path A - kernel with the driver built in (not tried on this phone)
+### Path A - kernel with the driver built in (SukiSU-Ultra tested on the phone, other variants not tried)
 
 ```sh
 ./spd_dump --wait 300 exec_addr 0x65015f08 fdl fdl1-dl.bin 0x65000800 \
