@@ -9,6 +9,8 @@ This pre-release carries two flashable `boot` images from one kernel build, Suki
 
 The kernel reports `5.15.149-android13-8-00008-gbe074b05e5af-ab<run number>`, the stock format, and the build fails when it does not (`config-report.txt`). Both images keep the stock `boot` header, AVB salt and properties (`scripts/replace_boot_kernel.sh`) and are signed with the public AOSP test key. Do not combine them with a root `init_boot`: write the stock `init_boot` first, because two root drivers at once are not supported.
 
+The kernel in this build sets `CONFIG_TMPFS_XATTR=y` (not set in the stock kernel on the phone or in earlier builds here) and keeps `CONFIG_OVERLAY_FS=y`; the build fails when either line is missing from `.config` (`kernel.config` in the artifact).
+
 The `builtin` branch, not the `v4.3.0-r2` tag, carries SUSFS: the tag's Kconfig has no `KSU_SUSFS` and it defines none of the hooks the SUSFS patch calls. The driver reports version code 41865 (`v4.2.1-1cfa5734@builtin`); the `v4.3.0-r2` manager is 41150.
 
 Static validation attached to this release:
