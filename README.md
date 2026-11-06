@@ -197,8 +197,10 @@ cd ~/tools/linux
 | Component | Source | Pin |
 |---|---|---|
 | Kernel | `android.googlesource.com/kernel/common` | tag `android13-5.15-2024-07_r1` (`be074b05e5af`) via manifest branch `common-android13-5.15-2024-07` |
-| SukiSU-Ultra driver (kernel path) | `github.com/SukiSU-Ultra/SukiSU-Ultra` | `builtin` at `b16e899a555e9b96aa1225f049cd7274820ca5b8` |
+| SukiSU-Ultra driver (kernel path) | `github.com/SukiSU-Ultra/SukiSU-Ultra` | `builtin` at `1cfa57340590971cba7521ed536da8ebbedc5f0a`, with `CONFIG_KSU_SUSFS=y` and `CONFIG_KPM=y`. The release tag `v4.3.0-r2` (`645ef986`) cannot be built in: its Kconfig has no `KSU_SUSFS`, and it defines none of the hooks the SUSFS patch calls (`ksu_handle_execveat`, `ksu_handle_stat`, `ksu_handle_faccessat`, `ksu_handle_sys_reboot`, `ksu_setup_preinit_file`) |
+| BakaSU driver (kernel path and LKM) | `github.com/Baka-SU/BakaSU` (formerly ReSukiSU; repository GPL-3.0, `kernel/` GPL-2.0-only) | tag `v4.2.0-rc3` at `239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb`, tracepoint hooks, no SUSFS: the SUSFS patch calls `ksu_setup_preinit_file` and `ksu_preinit_handle_post_execveat`, which this tag does not define |
 | KernelSU-Next driver (kernel path) | `github.com/KernelSU-Next/KernelSU-Next` | `dev` at `cefb048b069b7439fb4020d043de2d338dbc00fa` |
+| Kernel release string | `scripts/kernel_release.sh` | `5.15.149-android13-8-00008-gbe074b05e5af-ab<GITHUB_RUN_NUMBER>`, the stock format; `android13` and `8` come from `BRANCH` and `KMI_GENERATION` in the tree, `00008` is written out because the sources are a shallow clone |
 | SUSFS patch | `gitlab.com/simonpunk/susfs4ksu` | `gki-android13-5.15` at `3f3073a9f76247af765bfeba7908f4d3c580f2bc` |
 | LKM images | flavour release assets plus a host build of `ksud` | SukiSU-Ultra `v4.3.0`, KernelSU-Next `v3.4.2` |
 | PixelOS LKM image | `kernelsu.ko`, `ksud`, `ksuinit` built from source (`build-sukisu.sh` in the release) | SukiSU-Ultra `v4.3.0-r2` at `645ef9860b9b7f900bb5d1b27e224f2c311d39c0` |
@@ -212,13 +214,17 @@ cd ~/tools/linux
 
 GitHub Actions builds everything; nothing here needs a local machine. Dispatch the workflow with a `release_tag` to publish pre-releases, or push to `main` to only run the checks.
 
+`scripts/kernel_release.sh stamp` replaces `scripts/setlocalversion` in the synced tree, so the kernel reports the stock release format instead of Kleaf's unstamped `-maybe-dirty`; `kernel_release.sh check` fails the build when `Linux version` in `Image` carries `maybe-dirty` or differs from the expected string. `apply_root.sh` writes the driver version code into the copied driver (SukiSU-Ultra: `40000 + commits - 2815`; BakaSU: `30000 + commits + 700`, the upstream formulas), because the Kleaf sandbox has no git history to count. CI signs `boot-<variant>.img` with the public test key (`AVB_ALGORITHM=SHA256_RSA4096`); for the phone, run `replace_boot_kernel.sh` on `Image-<variant>` from the artifact with your own RSA-2048 key.
+
 Locally, with the pieces available:
 
 ```sh
 scripts/sync_sources.sh "$HOME/gki" be074b05e5aff5eb16a848fb3aaab2f73d687cb6 8
-scripts/apply_root.sh "$HOME/gki" https://github.com/SukiSU-Ultra/SukiSU-Ultra b16e899a555e9b96aa1225f049cd7274820ca5b8 patches/0001-susfs-android13-5.15.patch CONFIG_KSU=y
-cd "$HOME/gki" && tools/bazel run --config=fast //common:kernel_aarch64_dist -- --dist_dir="$HOME/dist"
-scripts/make_boot.sh "$HOME/dist/Image" boot-sukisu-ultra.img . 67108864
+scripts/kernel_release.sh stamp "$HOME/gki/common" be074b05e5aff5eb16a848fb3aaab2f73d687cb6 8 1
+scripts/apply_root.sh "$HOME/gki" https://github.com/SukiSU-Ultra/SukiSU-Ultra 1cfa57340590971cba7521ed536da8ebbedc5f0a patches/0001-susfs-android13-5.15.patch "$(printf '%s\n' CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_KPM=y)" builtin
+cd "$HOME/gki" && tools/bazel run --config=fast //common:kernel_aarch64_dist -- --dist_dir="$HOME/dist" && cd -
+scripts/kernel_release.sh check "$HOME/dist/Image" 5.15.149-android13-8-00008-gbe074b05e5af-ab1
+scripts/replace_boot_kernel.sh boot_a.bin "$HOME/dist/Image" <your-avb-key.pem> boot-sukisu-ultra.img
 python3 scripts/module_abi.py check --imports abi/vendor_dlkm.imports.tsv --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "$HOME/dist/kernel_aarch64_Module.symvers" --self-test
 ```
 
@@ -231,7 +237,7 @@ scripts/patch_kpm.sh "$HOME/dist/Image" Image-kpm
 scripts/replace_boot_kernel.sh boot_a.bin Image-kpm <your-avb-key.pem> boot-kpm.img
 ```
 
-`patch_kpm.sh` runs `kptools-linux` with the pinned `kpimg` from `SukiSU_KernelPatch_patch` 0.14.0 and fails unless the output grew by the payload and `kptools` lists it as patched; the release's own `patch_linux` binary writes an image without the payload, which is what hung the phone on 2026-11-03. `replace_boot_kernel.sh` keeps the stock header, AVB salt and properties, and signs with SHA256_RSA2048 at rollback index location 1 (the `boot` chain slot in `vbmeta_a`). The build took 13 minutes at 4 CPUs and peaked at 24 GB of memory.
+`patch_kpm.sh` runs `kptools-linux` with the pinned `kpimg` from `SukiSU_KernelPatch_patch` 0.14.0 and fails unless the output grew by the payload and `kptools` lists it as patched; the release's own `patch_linux` binary writes an image without the payload, which is what hung the phone on 2026-11-03. `replace_boot_kernel.sh` keeps the stock header, AVB salt and properties, and signs with SHA256_RSA2048 (`AVB_ALGORITHM` overrides it) at rollback index location 1 (the `boot` chain slot in `vbmeta_a`). The build took 13 minutes at 4 CPUs and peaked at 24 GB of memory.
 
 `scripts/bootimg.py` is a self-contained boot header v3/v4 packer; packing the stock kernel with it reproduces the stock `boot` and `init_boot` images byte for byte, which is the check that keeps it honest.
 

@@ -10,9 +10,6 @@ on:
       - 'root/kasumi-module/**'
       - 'keys/yukisu-anatdx.asc'
       - 'scripts/build_kasumi.sh'
-      - 'scripts/kallsyms-requirements.txt'
-      - 'scripts/patch_kpm.sh'
-      - 'scripts/replace_boot_kernel.sh'
       - '.github/workflows/scripts.yml'
   workflow_dispatch:
     inputs:
@@ -30,12 +27,24 @@ concurrency:
 
 env:
   KERNEL_COMMON_SHA: be074b05e5aff5eb16a848fb3aaab2f73d687cb6
+  KERNEL_SCM_COUNT: "8"
   BOOT_PARTITION_SIZE: "67108864"
   INIT_BOOT_PARTITION_SIZE: "8388608"
   KLEAF_FLAGS: --config=fast
   REPO_LAUNCHER_SHA256: 05f571deafd6ed6da0d20fa707dde29aa5624dbf35553d697a40dbdd4c8d178a
   STOCK_INIT_BOOT_URL: https://github.com/tickernelz/android_stock_meizu_mblu21/releases/download/mblu21-stock-U01005-20261031/init_boot_a.bin
   STOCK_INIT_BOOT_SHA256: d07159a1156578a86cbd8d5c240af92ce4c82a53d57f3f87532306828c2b5a9b
+  STOCK_BOOT_URL: https://github.com/tickernelz/android_stock_meizu_mblu21/releases/download/mblu21-stock-U01005-20261031/boot_a.bin
+  STOCK_BOOT_SHA256: 3a78e1394a5c3c52252384c7a136ae3c6c4fd758f0ba4a781c91813b1352f6da
+  PIXELOS_INIT_BOOT_URL: https://github.com/tickernelz/pixelos_build_mblu21/releases/download/PixelOS-17.0-20261105-1807-UNOFFICIAL-mblu21/init_boot.img
+  PIXELOS_INIT_BOOT_SHA256: 738c81512a8d1bd25f36480a5764b4a4737f1f5f0b8d076fb57b53060871896f
+  DDK_IMAGE: ghcr.io/ylarod/ddk-min@sha256:9e68cd9fcab748584755d31ba88ef134efc938dbde17f258c2652315f6cd81cd
+  BAKASU_REPO: https://github.com/Baka-SU/BakaSU
+  BAKASU_TAG: v4.2.0-rc3
+  BAKASU_SHA: 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
+  BAKASU_APK_URL: https://github.com/Baka-SU/BakaSU/releases/download/v4.2.0-rc3/ReSukiSU_v4.2.0-rc3_35171-arm64-v8a-release.apk
+  BAKASU_APK_SHA256: 25657bc449439687608fffa04b4b586de90fc405e3dc6217bd997fc71ba0a0a1
+  RUST_TOOLCHAIN: nightly-2026-09-22
 
 jobs:
   kernel:
@@ -48,14 +57,25 @@ jobs:
         include:
           - variant: sukisu-ultra
             root_url: https://github.com/SukiSU-Ultra/SukiSU-Ultra
-            root_sha: b16e899a555e9b96aa1225f049cd7274820ca5b8
+            root_ref: builtin
+            root_sha: 1cfa57340590971cba7521ed536da8ebbedc5f0a
             kernel_patch: patches/0001-susfs-android13-5.15.patch
-            required_config: CONFIG_KSU_SUSFS=y
+            required_config: CONFIG_KSU_SUSFS=y CONFIG_KPM=y
+            kpm: true
           - variant: kernelsu-next
             root_url: https://github.com/KernelSU-Next/KernelSU-Next
+            root_ref: v3.4.2
             root_sha: cefb048b069b7439fb4020d043de2d338dbc00fa
             kernel_patch: none
             required_config: CONFIG_KSU=y
+            kpm: false
+          - variant: bakasu
+            root_url: https://github.com/Baka-SU/BakaSU
+            root_ref: v4.2.0-rc3
+            root_sha: 239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
+            kernel_patch: none
+            required_config: CONFIG_KSU_TRACEPOINT_HOOK=y
+            kpm: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,9 +98,16 @@ jobs:
       - name: Sync kernel sources
         run: scripts/sync_sources.sh "$RUNNER_TEMP/gki" "$KERNEL_COMMON_SHA" "$(nproc)"
 
+      - name: Stamp the kernel release
+        run: |
+          release=$(scripts/kernel_release.sh stamp "$RUNNER_TEMP/gki/common" "$KERNEL_COMMON_SHA" "$KERNEL_SCM_COUNT" "$GITHUB_RUN_NUMBER")
+          echo "expected kernel release: $release"
+          echo "KERNEL_RELEASE=$release" >> "$GITHUB_ENV"
+
       - name: Apply ${{ matrix.variant }} integration
         run: |
-          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" "CONFIG_KSU=y"
+          scripts/apply_root.sh "$RUNNER_TEMP/gki" "${{ matrix.root_url }}" "${{ matrix.root_sha }}" "${{ matrix.kernel_patch }}" \
+            "$(printf '%s\n' CONFIG_KSU=y ${{ matrix.required_config }})" "${{ matrix.root_ref }}"
 
       - name: Build kernel
         run: |
@@ -112,13 +139,20 @@ jobs:
             echo "symvers=$symvers"
             echo "image=$image"
           } >> "$GITHUB_OUTPUT"
+          cp "$config" kernel.config
           {
             echo "kernel release: $(grep -a -o -m1 'Linux version 5[^(]*' "$image")"
             echo "Module.symvers: $(basename "$symvers") ($(wc -l < "$symvers") exports)"
-            grep -E '^CONFIG_KSU|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
+            grep -E '^CONFIG_KSU|^CONFIG_KPM|^CONFIG_MODVERSIONS|^CONFIG_KPROBES|^CONFIG_MODULE_SIG_PROTECT|^CONFIG_THREAD_INFO_IN_TASK' "$config" | sort
           } | tee config-report.txt
-          grep -qx '${{ matrix.required_config }}' "$config"
-          grep -qx 'CONFIG_KSU=y' "$config"
+          for line in CONFIG_KSU=y ${{ matrix.required_config }}; do
+            grep -qx "$line" "$config"
+          done
+
+      - name: Check the kernel release
+        run: |
+          set -euo pipefail
+          scripts/kernel_release.sh check "${{ steps.collect.outputs.image }}" "$KERNEL_RELEASE" | tee -a config-report.txt
 
       - name: Check module ABI against stock modules
         run: |
@@ -128,14 +162,33 @@ jobs:
             python3 scripts/module_abi.py check --imports "abi/$set.imports.tsv" --module-exports abi/vendor_boot.exports.tsv abi/vendor_dlkm.exports.tsv abi/system_dlkm.exports.tsv --symvers "${{ steps.collect.outputs.symvers }}" --self-test | tee -a "abi-$set.txt"
           done
 
-      - name: Pack boot image
+      - name: Pack boot images
+        env:
+          AVB_ALGORITHM: SHA256_RSA4096
         run: |
-          scripts/make_boot.sh "${{ steps.collect.outputs.image }}" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$GITHUB_WORKSPACE" "$BOOT_PARTITION_SIZE"
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/boot_a.bin" "$STOCK_BOOT_URL"
+          echo "$STOCK_BOOT_SHA256  $RUNNER_TEMP/boot_a.bin" | sha256sum -c -
+          image="${{ steps.collect.outputs.image }}"
+          cp "$image" "$RUNNER_TEMP/Image-${{ matrix.variant }}"
+          scripts/replace_boot_kernel.sh "$RUNNER_TEMP/boot_a.bin" "$image" keys/testkey_rsa4096.pem "$RUNNER_TEMP/boot-${{ matrix.variant }}.img"
+          if [ "${{ matrix.kpm }}" = true ]; then
+            scripts/patch_kpm.sh "$image" "$RUNNER_TEMP/Image-${{ matrix.variant }}-kpm" | tee -a config-report.txt
+            scripts/kernel_release.sh check "$RUNNER_TEMP/Image-${{ matrix.variant }}-kpm" "$KERNEL_RELEASE" | tee -a config-report.txt
+            scripts/replace_boot_kernel.sh "$RUNNER_TEMP/boot_a.bin" "$RUNNER_TEMP/Image-${{ matrix.variant }}-kpm" keys/testkey_rsa4096.pem "$RUNNER_TEMP/boot-${{ matrix.variant }}-kpm.img"
+          fi
 
-      - name: Verify boot image
+      - name: Verify boot images
         run: |
-          python3 scripts/verify_image.py --image "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" --max-size "$BOOT_PARTITION_SIZE" --header-version 4
-          (cd "$RUNNER_TEMP" && sha256sum "boot-${{ matrix.variant }}.img" | tee "boot-${{ matrix.variant }}.img.sha256")
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          for img in boot-${{ matrix.variant }}.img boot-${{ matrix.variant }}-kpm.img; do
+            if [ -f "$img" ]; then
+              python3 "$GITHUB_WORKSPACE/scripts/verify_image.py" --image "$img" --max-size "$BOOT_PARTITION_SIZE" --header-version 4
+              sha256sum "$img" | tee "$img.sha256"
+            fi
+          done
+          sha256sum Image-${{ matrix.variant }}* | tee "Image-${{ matrix.variant }}.sha256"
 
       - name: Record validation summary
         run: |
@@ -147,15 +200,16 @@ jobs:
             echo '```'
             cat abi-vendor_boot.txt abi-vendor_dlkm.txt abi-system_dlkm.txt
             echo '```'
-            cat "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256"
+            cat "$RUNNER_TEMP"/boot-${{ matrix.variant }}*.img.sha256 "$RUNNER_TEMP/Image-${{ matrix.variant }}.sha256"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Stage artifacts
         run: |
           stage="$RUNNER_TEMP/stage-${{ matrix.variant }}"
           mkdir -p "$stage"
-          cp "$RUNNER_TEMP/boot-${{ matrix.variant }}.img" "$RUNNER_TEMP/boot-${{ matrix.variant }}.img.sha256" \
-             config-report.txt abi-vendor_boot.txt abi-vendor_dlkm.txt abi-system_dlkm.txt "$stage/"
+          cp "$RUNNER_TEMP"/boot-${{ matrix.variant }}*.img "$RUNNER_TEMP"/boot-${{ matrix.variant }}*.img.sha256 \
+             "$RUNNER_TEMP"/Image-${{ matrix.variant }}* \
+             config-report.txt kernel.config abi-vendor_boot.txt abi-vendor_dlkm.txt abi-system_dlkm.txt "$stage/"
           ls -la "$stage"
 
       - uses: actions/upload-artifact@v4
@@ -247,10 +301,134 @@ jobs:
             ${{ runner.temp }}/kernelsu.ko
             ${{ runner.temp }}/susfs_guard_lkm.ko
 
+  bakasu-lkm:
+    name: lkm bakasu (built from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OUT: ${{ github.workspace }}/out-bakasu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch BakaSU source
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT"
+          src="$RUNNER_TEMP/bakasu"
+          git clone --quiet --filter=blob:none --no-checkout "$BAKASU_REPO" "$src"
+          git -C "$src" -c advice.detachedHead=false checkout --quiet "$BAKASU_SHA"
+          test "$(git -C "$src" rev-parse HEAD)" = "$BAKASU_SHA"
+          test "$(git -C "$src" rev-parse "refs/tags/$BAKASU_TAG^{commit}")" = "$BAKASU_SHA"
+          echo "BakaSU $BAKASU_TAG = $BAKASU_SHA ($BAKASU_REPO), $(git -C "$src" rev-list --count HEAD) commits" | tee "$OUT/lkm-bakasu.log"
+
+      - name: Build kernelsu.ko for android13-5.15
+        run: |
+          set -euo pipefail
+          docker run --rm --memory 4g --memory-swap 4g --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$RUNNER_TEMP/bakasu:/src" -v "$GITHUB_WORKSPACE/scripts:/scripts:ro" \
+            "$DDK_IMAGE" /scripts/build_bakasu_lkm.sh /src /src/android13-5.15_kernelsu.ko 2>&1 | tee -a "$OUT/lkm-bakasu.log"
+          cp "$RUNNER_TEMP/bakasu/android13-5.15_kernelsu.ko" "$OUT/"
+          modinfo "$OUT/android13-5.15_kernelsu.ko" | grep -E '^(vermagic|name|license):' | tee -a "$OUT/lkm-bakasu.log"
+
+      - name: Check kernelsu.ko against the stock kernel
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/boot_a.bin" "$STOCK_BOOT_URL"
+          echo "$STOCK_BOOT_SHA256  $RUNNER_TEMP/boot_a.bin" | sha256sum -c -
+          python3 scripts/bootimg.py kernel "$RUNNER_TEMP/boot_a.bin" "$RUNNER_TEMP/Image"
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --no-deps --require-hashes -r scripts/kallsyms-requirements.txt
+          "$RUNNER_TEMP/venv/bin/kallsyms-finder" "$RUNNER_TEMP/Image" > "$RUNNER_TEMP/kallsyms.txt"
+          vermagic=$(strings -a "$RUNNER_TEMP/Image" | grep -m1 -E '^5\.15\.149-[^ ]+ SMP ')
+          echo "stock kernel vermagic: $vermagic" | tee -a "$OUT/lkm-bakasu.log"
+          python3 scripts/module_abi.py lkm --kallsyms "$RUNNER_TEMP/kallsyms.txt" --modules "$OUT/android13-5.15_kernelsu.ko" \
+            --release-prefix 5.15. --kernel-release "${vermagic%% *}" --vermagic-flags "${vermagic#* }" --self-test \
+            | tee -a "$OUT/lkm-bakasu.log"
+
+      - name: Build ksuinit and ksud
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/bakasu"
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rust-src --target aarch64-linux-android
+          cargo install cargo-ndk --locked
+          {
+            echo "NDK: $(sed -n 's/^Pkg.Revision *= *//p' "$ANDROID_NDK_HOME/source.properties")"
+            rustc "+$RUST_TOOLCHAIN" -V
+            cargo ndk --version
+          } | tee -a "$OUT/lkm-bakasu.log"
+          (
+            cd "$src"
+            source .github/scripts/setup-rust-build.sh aarch64-linux-android 26
+            builtins="$("$CLANG_PATH" --print-resource-dir)/lib/linux/libclang_rt.builtins-aarch64-android.a"
+            test -f "$builtins"
+            export RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wno-unused-command-line-argument -C link-arg=$builtins"
+            cd userspace/ksuinit
+            cargo "+$RUST_TOOLCHAIN" build --package ksuinit --target aarch64-linux-android --release
+          ) 2>&1 | tee -a "$OUT/lkm-bakasu.log"
+          cp "$src/userspace/ksuinit/target/aarch64-linux-android/release/ksuinit" "$OUT/ksuinit"
+          cp "$OUT/ksuinit" "$OUT/android13-5.15_kernelsu.ko" "$src/userspace/ksud/bin/aarch64/"
+          clang --target=aarch64-linux-gnu -c -nostdlib -o "$src/userspace/ksud/.lkm_image_bootstrap.o" "$src/userspace/ksud/src/lkm_image_bootstrap.S"
+          (
+            cd "$src/userspace/ksud"
+            cargo "+$RUST_TOOLCHAIN" ndk b -P 26 -t aarch64-linux-android -r -Z build-std-features="optimize_for_size" -Z trim-paths
+            cargo "+$RUST_TOOLCHAIN" build --release --target x86_64-unknown-linux-gnu
+          ) 2>&1 | tee -a "$OUT/lkm-bakasu.log"
+          cp "$src/userspace/ksud/target/aarch64-linux-android/release/ksud" "$OUT/ksud-aarch64-linux-android"
+          cp "$src/userspace/ksud/target/x86_64-unknown-linux-gnu/release/ksud" "$RUNNER_TEMP/ksud-host"
+          file "$OUT/ksuinit" "$OUT/ksud-aarch64-linux-android" "$RUNNER_TEMP/ksud-host" | tee -a "$OUT/lkm-bakasu.log"
+          "$RUNNER_TEMP/ksud-host" --version | tee -a "$OUT/lkm-bakasu.log"
+
+      - name: Patch the PixelOS 1807 init_boot
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/init_boot-1807.img" "$PIXELOS_INIT_BOOT_URL"
+          echo "$PIXELOS_INIT_BOOT_SHA256  $RUNNER_TEMP/init_boot-1807.img" | sha256sum -c -
+          scripts/patch_init_boot.sh bakasu "$RUNNER_TEMP/ksud-host" "$OUT/android13-5.15_kernelsu.ko" "$RUNNER_TEMP/init_boot-1807.img" "$RUNNER_TEMP/lkm-out" "$OUT/ksuinit" \
+            | tee "$RUNNER_TEMP/patch.log"
+          cat "$RUNNER_TEMP/patch.log" >> "$OUT/lkm-bakasu.log"
+          grep -qx 'patched with bundled ksuinit' "$RUNNER_TEMP/patch.log"
+          image=$(find "$RUNNER_TEMP/lkm-out" -name '*.img' | head -1)
+          python3 scripts/verify_image.py --image "$image" --max-size "$INIT_BOOT_PARTITION_SIZE" --header-version 4 --contains kernelsu.ko --min-ramdisk-size 2200000 \
+            | tee -a "$OUT/lkm-bakasu.log"
+          cp "$image" "$OUT/init_boot-PixelOS_mblu21-17.0-20261105-1807-bakasu-$BAKASU_TAG.img"
+
+      - name: Fetch the upstream manager APK
+        run: |
+          set -euo pipefail
+          apk="$OUT/$(basename "$BAKASU_APK_URL")"
+          curl -fsSL --retry 3 -o "$apk" "$BAKASU_APK_URL"
+          echo "$BAKASU_APK_SHA256  $apk" | sha256sum -c -
+          aapt2=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -V | tail -1)
+          "$aapt2" dump badging "$apk" | grep -E '^(package|application-label):' | tee -a "$OUT/lkm-bakasu.log"
+
+      - name: Check and checksum the release files
+        run: |
+          set -euo pipefail
+          if grep -l -a -E 'BEGIN ([A-Z]+ )?PRIVATE KEY' "$OUT"/*; then
+            echo "private key material found in release files" >&2
+            exit 1
+          fi
+          (cd "$OUT" && sha256sum -- * > SHA256SUMS-bakasu && cat SHA256SUMS-bakasu)
+          {
+            echo "### bakasu LKM"
+            echo '```'
+            cat "$OUT/SHA256SUMS-bakasu"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lkm-bakasu
+          if-no-files-found: error
+          path: ${{ env.OUT }}/
+
   release:
     name: publish UNTESTED pre-releases
     runs-on: ubuntu-latest
-    needs: [kernel, lkm]
+    needs: [kernel, lkm, bakasu-lkm]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
     permissions:
       contents: write
@@ -275,9 +453,9 @@ jobs:
           fi
           tag_suffix="$RELEASE_TAG"
           find assets -type f | sort
-          for variant in sukisu-ultra kernelsu-next; do
+          for variant in sukisu-ultra kernelsu-next bakasu; do
             tag="$variant-$tag_suffix-untested"
-            (cd "assets/boot-$variant" && sha256sum -c "boot-$variant.img.sha256" --ignore-missing)
+            (cd "assets/boot-$variant" && sha256sum -c boot-"$variant"*.img.sha256)
             files=("assets/boot-$variant/boot-$variant.img" "assets/boot-$variant/boot-$variant.img.sha256"
                    "assets/boot-$variant/abi-vendor_boot.txt" "assets/boot-$variant/abi-vendor_dlkm.txt" "assets/boot-$variant/abi-system_dlkm.txt"
                    "assets/boot-$variant/config-report.txt" "assets/lkm-$variant/lkm-$variant.log")
@@ -286,6 +464,19 @@ jobs:
                 files+=("assets/lkm-$variant/$extra")
               fi
             done
+            for extra in "boot-$variant-kpm.img" "boot-$variant-kpm.img.sha256"; do
+              if [ -f "assets/boot-$variant/$extra" ]; then
+                files+=("assets/boot-$variant/$extra")
+              fi
+            done
+            if [ "$variant" = bakasu ]; then
+              (cd assets/lkm-bakasu && sha256sum -c SHA256SUMS-bakasu)
+              for extra in assets/lkm-bakasu/*; do
+                if [ "$extra" != assets/lkm-bakasu/lkm-bakasu.log ]; then
+                  files+=("$extra")
+                fi
+              done
+            fi
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "release $tag already exists; pick a new release_tag" >&2
               exit 1

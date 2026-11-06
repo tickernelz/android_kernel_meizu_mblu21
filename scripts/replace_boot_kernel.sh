@@ -9,6 +9,7 @@ output=${4:?$usage}
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 avbtool="$repo_root/tools/avbtool.py"
 rollback_index_location=${ROLLBACK_INDEX_LOCATION:-1}
+algorithm=${AVB_ALGORITHM:-SHA256_RSA2048}
 
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
@@ -44,7 +45,7 @@ python3 "$avbtool" add_hash_footer \
   --image "$workdir/boot.img" \
   --partition_size "$partition_size" \
   --partition_name boot \
-  --algorithm SHA256_RSA2048 \
+  --algorithm "$algorithm" \
   --key "$key" \
   --salt "$salt" \
   --rollback_index_location "$rollback_index_location" \
