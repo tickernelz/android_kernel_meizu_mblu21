@@ -47,7 +47,7 @@ require_line() {
 
 pin_driver_version() {
   local dir=$1 file count tag sha8 base offset version
-  file=$(grep -lE '^KSU_VERSION[[:space:]]*:=' "$dir/Kbuild" "$dir/Makefile" 2>/dev/null | head -1 || true)
+  file=$(grep -lE '^KSU_VERSION(_FALLBACK)?[[:space:]]*:=' "$dir/Kbuild" "$dir/Makefile" 2>/dev/null | head -1 || true)
   if [ -z "$file" ]; then
     echo "driver version: no KSU_VERSION assignment in Kbuild/Makefile, left to the driver build"
     return
@@ -80,12 +80,27 @@ pin_driver_version() {
     require_line "$file" "^KSU_LOCAL_VERSION := $count$"
     require_line "$file" "^KSU_COMMIT_SHA := $sha8$"
     require_line "$file" '^ifneq \(0,0\)$'
+  elif grep -qE '^KSU_VERSION_FALLBACK[[:space:]]*:=' "$file"; then
+    base=$(sed -nE 's/.*expr[[:space:]]+([0-9]+)[[:space:]]*\+[[:space:]]*\$\(KSU_GIT_VERSION\).*/\1/p' "$file" | head -1)
+    if [ -z "$base" ]; then
+      echo "$file: no 'expr <base> + \$(KSU_GIT_VERSION)' version formula" >&2
+      exit 1
+    fi
+    version=$((base + count))
+    sed -i -E \
+      -e 's/^GIT_ROOT[[:space:]]*:=.*/GIT_ROOT :=/' \
+      -e "s/^KSU_VERSION_FALLBACK[[:space:]]*:=.*/KSU_VERSION_FALLBACK := $version/" \
+      -e "s/^KSU_VERSION_TAG_FALLBACK[[:space:]]*:=.*/KSU_VERSION_TAG_FALLBACK := $tag/" \
+      "$file"
+    require_line "$file" '^GIT_ROOT :=$'
+    require_line "$file" "^KSU_VERSION_FALLBACK := $version$"
+    require_line "$file" "^KSU_VERSION_TAG_FALLBACK := $tag$"
   else
     echo "$file: unknown KSU_VERSION layout" >&2
     exit 1
   fi
   echo "driver version pinned in ${file#"$common/"}: commit count $count, tag $tag, $sha8@$root_ref"
-  grep -nE '^(KSU_VERSION|KSU_VERSION_FULL|KSU_LOCAL_VERSION|KSU_TAG_NAME|KSU_COMMIT_SHA|KSU_BRANCH_NAME)[[:space:]]*:=' "$file"
+  grep -nE '^(KSU_VERSION|KSU_VERSION_FULL|KSU_VERSION_FALLBACK|KSU_VERSION_TAG_FALLBACK|GIT_ROOT|KSU_LOCAL_VERSION|KSU_TAG_NAME|KSU_COMMIT_SHA|KSU_BRANCH_NAME)[[:space:]]*:=' "$file"
 }
 pin_driver_version "$common/drivers/kernelsu"
 
