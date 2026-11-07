@@ -66,7 +66,7 @@ jobs:
           - variant: kernelsu-next
             root_url: https://github.com/KernelSU-Next/KernelSU-Next
             root_ref: v3.4.2
-            root_sha: cefb048b069b7439fb4020d043de2d338dbc00fa
+            root_sha: 4c706b5938665866ebe16944a481a7b91e3396af
             kernel_patch: none
             required_config: CONFIG_KSU=y
             kpm: false
