@@ -100,7 +100,7 @@ pin_driver_version() {
     exit 1
   fi
   echo "driver version pinned in ${file#"$common/"}: commit count $count, tag $tag, $sha8@$root_ref"
-  grep -nE '^(KSU_VERSION|KSU_VERSION_FULL|KSU_LOCAL_VERSION|KSU_TAG_NAME|KSU_COMMIT_SHA|KSU_BRANCH_NAME)[[:space:]]*:=' "$file"
+  grep -nE '^(KSU_VERSION|KSU_VERSION_FULL|KSU_VERSION_FALLBACK|KSU_VERSION_TAG_FALLBACK|GIT_ROOT|KSU_LOCAL_VERSION|KSU_TAG_NAME|KSU_COMMIT_SHA|KSU_BRANCH_NAME)[[:space:]]*:=' "$file"
 }
 pin_driver_version "$common/drivers/kernelsu"
 
